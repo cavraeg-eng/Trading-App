@@ -1,0 +1,122 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-trading-border;
+  }
+  
+  body {
+    @apply bg-trading-bg text-trading-text antialiased;
+  }
+}
+
+@layer components {
+  .btn-buy {
+    @apply bg-trading-buy hover:bg-emerald-600 text-white font-semibold py-2 px-4 rounded transition-colors;
+  }
+  
+  .btn-sell {
+    @apply bg-trading-sell hover:bg-red-600 text-white font-semibold py-2 px-4 rounded transition-colors;
+  }
+  
+  .card {
+    @apply bg-trading-card border border-trading-border rounded-lg p-4;
+  }
+  
+  .input-field {
+    @apply bg-trading-bg border border-trading-border rounded px-3 py-2 text-trading-text focus:outline-none focus:border-trading-accent;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Chart container styles */
+.trading-chart-container {
+  width: 100%;
+  min-height: 400px;
+  position: relative;
+}
+
+.indicator-chart-container {
+  width: 100%;
+  min-height: 150px;
+  position: relative;
+}
+
+/* Smooth transitions for chart type switching and indicator toggling */
+.chart-transition {
+  transition: opacity 0.2s ease-in-out;
+}
+
+/* Pair heatmap grid styles */
+.heatmap-cell {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.heatmap-cell:hover {
+  transform: scale(1.05);
+  z-index: 10;
+}
+
+/* Pair selector dropdown animation */
+.dropdown-enter {
+  animation: dropdownSlideIn 0.15s ease-out;
+}
+
+@keyframes dropdownSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Confidence bar animation for AI recommendations */
+.confidence-bar {
+  transition: width 0.5s ease-out;
+}
+
+/* Scrollbar styling for dark theme */
+.dark-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.dark-scrollbar::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+.dark-scrollbar::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 3px;
+}
+
+.dark-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Indicator toggle chip active state */
+.indicator-chip {
+  transition: background-color 0.15s ease, color 0.15s ease;
+}

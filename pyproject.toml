@@ -1,0 +1,114 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-trading-bot"
+version = "1.0.0"
+description = "Production-ready AI-powered cryptocurrency trading bot using Reinforcement Learning"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Quantitative Developer", email = "dev@tradingbot.com"}
+]
+keywords = ["trading", "cryptocurrency", "ai", "reinforcement-learning", "quantitative"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+
+dependencies = [
+    # Core
+    "numpy>=1.26.0,<2.0.0",
+    "pandas>=2.1.0,<3.0.0",
+    "pydantic>=2.5.0,<3.0.0",
+    "pydantic-settings>=2.1.0",
+    "python-dotenv>=1.0.0",
+    
+    # Data & Exchange
+    "ccxt>=4.2.0,<5.0.0",
+    "aiohttp>=3.9.0",
+    "websockets>=12.0,<13.0",
+    "pyarrow>=14.0.0",
+    "aiosqlite>=0.19.0",
+    "redis>=5.0.0",
+    "hiredis>=2.2.0",
+    
+    # Technical Analysis (using pure pandas/numpy implementations)
+    
+    # ML & RL
+    "torch>=2.1.0,<2.3.0",
+    "stable-baselines3>=2.3.0,<3.0.0",
+    "gymnasium>=0.29.0,<1.0.0",
+    "optuna>=3.5.0,<4.0.0",
+    "shap>=0.44.0",
+    
+    # Backtesting
+    "vectorbt>=0.26.0",
+    
+    # Logging & Monitoring
+    "structlog>=24.1.0",
+    "python-telegram-bot>=20.7",
+    "discord.py>=2.3.0",
+    "streamlit>=1.29.0",
+    "plotly>=5.18.0",
+    
+    # Utilities
+    "schedule>=1.2.0",
+    "tenacity>=8.2.0",
+    "cachetools>=5.3.0",
+    "orjson>=3.9.0",
+    "typer>=0.9.0",
+    "rich>=13.7.0",
+    "pytz>=2023.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.7.0",
+    "pre-commit>=3.6.0",
+]
+
+[project.scripts]
+trading-bot = "trading_bot.main:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["trading_bot*"]
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+include = '\.pyi?$'
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short"

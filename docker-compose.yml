@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  trading-bot:
+    build: .
+    container_name: ai-trading-bot
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    command: python -m trading_bot.main run --mode paper
+    restart: unless-stopped
+    networks:
+      - trading-network
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "python", "-c", "import trading_bot; print('OK')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  dashboard:
+    build: .
+    container_name: trading-dashboard
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    command: streamlit run trading_bot/monitoring/dashboard.py --server.port 8501 --server.address 0.0.0.0
+    restart: unless-stopped
+    networks:
+      - trading-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: trading-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - trading-network
+
+  # Optional: Jupyter notebook for research
+  jupyter:
+    build: .
+    container_name: trading-jupyter
+    ports:
+      - "8888:8888"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./notebooks:/app/notebooks
+    command: jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token=''
+    restart: unless-stopped
+    networks:
+      - trading-network
+    profiles:
+      - research
+
+volumes:
+  redis-data:
+
+networks:
+  trading-network:
+    driver: bridge
