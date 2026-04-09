@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+import asyncio
 import uuid
 
 router = APIRouter(prefix="/api/trading", tags=["paper_trading"])
@@ -14,6 +15,9 @@ _paper_account = {
     "trades_history": [],
     "initial_balance": 10000.0,
 }
+
+# Lock to serialize account state mutations
+_account_lock = asyncio.Lock()
 
 class PaperOrderRequest(BaseModel):
     symbol: str
@@ -32,59 +36,62 @@ class PaperOrderRequest(BaseModel):
 @router.post("/paper-order")
 async def place_paper_order(order: PaperOrderRequest):
     """Place a simulated paper trade."""
-    # Validate
-    if order.side not in ("buy", "sell"):
-        raise HTTPException(status_code=400, detail="Side must be 'buy' or 'sell'")
-    if order.quantity <= 0:
-        raise HTTPException(status_code=400, detail="Quantity must be positive")
+    async with _account_lock:
+        # Validate
+        if order.side not in ("buy", "sell"):
+            raise HTTPException(status_code=400, detail="Side must be 'buy' or 'sell'")
+        if order.quantity <= 0:
+            raise HTTPException(status_code=400, detail="Quantity must be positive")
+
+        # Validate entry price — market orders must include a valid current price
+        if not order.price or order.price <= 0:
+            raise HTTPException(status_code=400, detail="Market orders must include a valid current price")
+        entry_price = order.price
     
-    # Use provided price or default to 0 (market orders would use current price)
-    entry_price = order.price or 0
+        # Calculate notional value
+        notional = order.quantity * entry_price if entry_price > 0 else 0
+
+        # Check balance (simplified — just check we have capital)
+        if _paper_account["balance"] <= 0:
+            raise HTTPException(status_code=400, detail="Insufficient paper balance")
+
+        # Create trade record
+        trade_id = str(uuid.uuid4())[:8]
+        trade = {
+            "trade_id": trade_id,
+            "symbol": order.symbol,
+            "side": order.side,
+            "quantity": round(order.quantity, 2),
+            "entry_price": entry_price,
+            "stop_loss": order.stop_loss,
+            "take_profit_1": order.take_profit_1,
+            "take_profit_2": order.take_profit_2,
+            "take_profit_3": order.take_profit_3,
+            "status": "filled",
+            "opened_at": datetime.utcnow().isoformat(),
+            "risk_percent": order.risk_percent,
+            "trade_style": order.trade_style,
+            "confidence": order.confidence,
+            "pnl": 0.0,
+        }
+
+        # Add to positions
+        _paper_account["positions"].append(trade)
+        _paper_account["trades_history"].append(trade)
     
-    # Calculate notional value
-    notional = order.quantity * entry_price if entry_price > 0 else 0
-    
-    # Check balance (simplified - just check we have capital)
-    if _paper_account["balance"] <= 0:
-        raise HTTPException(status_code=400, detail="Insufficient paper balance")
-    
-    # Create trade record
-    trade_id = str(uuid.uuid4())[:8]
-    trade = {
-        "trade_id": trade_id,
-        "symbol": order.symbol,
-        "side": order.side,
-        "quantity": round(order.quantity, 2),
-        "entry_price": entry_price,
-        "stop_loss": order.stop_loss,
-        "take_profit_1": order.take_profit_1,
-        "take_profit_2": order.take_profit_2,
-        "take_profit_3": order.take_profit_3,
-        "status": "filled",
-        "opened_at": datetime.utcnow().isoformat(),
-        "risk_percent": order.risk_percent,
-        "trade_style": order.trade_style,
-        "confidence": order.confidence,
-        "pnl": 0.0,
-    }
-    
-    # Add to positions
-    _paper_account["positions"].append(trade)
-    _paper_account["trades_history"].append(trade)
-    
-    return {
-        "success": True,
-        "order_id": trade_id,
-        "status": "filled",
-        "symbol": order.symbol,
-        "side": order.side,
-        "quantity": round(order.quantity, 2),
-        "entry_price": entry_price,
-        "stop_loss": order.stop_loss,
-        "take_profit_levels": [order.take_profit_1, order.take_profit_2, order.take_profit_3],
-        "message": f"Paper {order.side.upper()} order filled: {round(order.quantity, 2)} {order.symbol} at {entry_price}",
-        "timestamp": datetime.utcnow().isoformat(),
-    }
+        return {
+            "success": True,
+            "order_id": trade_id,
+            "status": "filled",
+            "symbol": order.symbol,
+            "side": order.side,
+            "quantity": round(order.quantity, 2),
+            "entry_price": entry_price,
+            "stop_loss": order.stop_loss,
+            "take_profit_levels": [order.take_profit_1, order.take_profit_2, order.take_profit_3],
+            "message": f"Paper {order.side.upper()} order filled: {round(order.quantity, 2)} {order.symbol} at {entry_price}",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
 
 @router.get("/paper-positions")
 async def get_paper_positions():

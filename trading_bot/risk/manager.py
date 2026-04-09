@@ -119,6 +119,10 @@ class RiskManager:
         """
         notional = size * price
         
+        # Check zero equity
+        if self.state.current_equity <= 0:
+            return False, "Zero equity"
+        
         # Check daily drawdown
         if self.state.daily_drawdown >= self.max_daily_drawdown:
             return False, f"Daily drawdown limit reached: {self.state.daily_drawdown:.2%}"
@@ -233,8 +237,9 @@ class RiskManager:
         
         # Calculate drawdown
         self.state.daily_drawdown = (
-            self.state.peak_equity - self.state.current_equity
-        ) / self.state.peak_equity
+            (self.state.peak_equity - self.state.current_equity)
+            / self.state.peak_equity
+        ) if self.state.peak_equity > 0 else 0.0
         
         # Record trade
         self.trade_history.append({
@@ -307,7 +312,9 @@ class RiskManager:
             return True, f"Daily drawdown circuit breaker: {self.state.daily_drawdown:.2%}"
         
         # Total drawdown
-        total_drawdown = (self.state.peak_equity - self.state.current_equity) / self.state.peak_equity
+        total_drawdown = (
+            (self.state.peak_equity - self.state.current_equity) / self.state.peak_equity
+        ) if self.state.peak_equity > 0 else 0.0
         if total_drawdown >= self.max_daily_drawdown * 2:  # 2x daily limit for total
             return True, f"Total drawdown circuit breaker: {total_drawdown:.2%}"
         
@@ -375,10 +382,10 @@ class RiskManager:
         return {
             "current_equity": self.state.current_equity,
             "peak_equity": self.state.peak_equity,
-            "total_return": (self.state.current_equity - self.initial_capital) / self.initial_capital,
+            "total_return": (self.state.current_equity - self.initial_capital) / self.initial_capital if self.initial_capital > 0 else 0.0,
             "daily_pnl": self.state.daily_pnl,
             "daily_drawdown": self.state.daily_drawdown,
-            "total_drawdown": (self.state.peak_equity - self.state.current_equity) / self.state.peak_equity,
+            "total_drawdown": (self.state.peak_equity - self.state.current_equity) / self.state.peak_equity if self.state.peak_equity > 0 else 0.0,
             "open_positions": len(self.state.open_positions),
             "total_exposure": self.state.total_exposure,
             "exposure_pct": self.state.total_exposure / self.state.current_equity if self.state.current_equity > 0 else 0,

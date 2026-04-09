@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Search, Save, ArrowRight } from 'lucide-react';
 import ScannerBuilder from '../components/ScannerBuilder';
 import ScannerPresets from '../components/ScannerPresets';
@@ -22,6 +22,7 @@ export default function Scanner({ onPairChange, recentPairs: _recentPairs }: Sca
   const [sortBy, setSortBy] = useState<'score' | 'symbol' | 'volume'>('score');
   const [scannerName, setScannerName] = useState('');
   const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [autoRunScan, setAutoRunScan] = useState(false);
 
   const allPairs = ALL_FOREX_PAIRS.map((p) => ({
     symbol: p.symbol,
@@ -56,13 +57,18 @@ export default function Scanner({ onPairChange, recentPairs: _recentPairs }: Sca
       setScannerName(preset.name);
       setConditions(preset.conditions);
       setLogic(preset.logic);
-      // Auto-run after a short delay to let state update
-      setTimeout(() => {
-        runScan();
-      }, 100);
+      setAutoRunScan(true);
     },
-    [runScan]
+    []
   );
+
+  // Auto-run scan when triggered by preset selection
+  useEffect(() => {
+    if (autoRunScan && conditions.length > 0) {
+      runScan();
+      setAutoRunScan(false);
+    }
+  }, [autoRunScan, conditions]);
 
   const saveScanner = async () => {
     if (!scannerName.trim()) {

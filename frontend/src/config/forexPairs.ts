@@ -7,7 +7,7 @@ export const MAJOR_PAIRS: ForexPair[] = [
     nickname: 'Fiber',
     category: 'major',
     baseSpread: 0.2,
-    basePriceApprox: 1.08,
+    basePriceApprox: 1.17,
   },
   {
     symbol: 'USD/JPY',
@@ -15,7 +15,7 @@ export const MAJOR_PAIRS: ForexPair[] = [
     nickname: 'Gopher',
     category: 'major',
     baseSpread: 0.5,
-    basePriceApprox: 155,
+    basePriceApprox: 158.50,
   },
   {
     symbol: 'GBP/USD',
@@ -23,7 +23,7 @@ export const MAJOR_PAIRS: ForexPair[] = [
     nickname: 'Cable',
     category: 'major',
     baseSpread: 0.6,
-    basePriceApprox: 1.27,
+    basePriceApprox: 1.34,
   },
   {
     symbol: 'USD/CHF',
@@ -31,7 +31,7 @@ export const MAJOR_PAIRS: ForexPair[] = [
     nickname: 'Swissie',
     category: 'major',
     baseSpread: 0.8,
-    basePriceApprox: 0.88,
+    basePriceApprox: 0.845,
   },
   {
     symbol: 'AUD/USD',
@@ -39,7 +39,7 @@ export const MAJOR_PAIRS: ForexPair[] = [
     nickname: 'Aussie',
     category: 'major',
     baseSpread: 0.6,
-    basePriceApprox: 0.65,
+    basePriceApprox: 0.64,
   },
   {
     symbol: 'USD/CAD',
@@ -47,7 +47,7 @@ export const MAJOR_PAIRS: ForexPair[] = [
     nickname: 'Loonie',
     category: 'major',
     baseSpread: 0.5,
-    basePriceApprox: 1.37,
+    basePriceApprox: 1.385,
   },
   {
     symbol: 'NZD/USD',
@@ -55,7 +55,7 @@ export const MAJOR_PAIRS: ForexPair[] = [
     nickname: 'Kiwi',
     category: 'major',
     baseSpread: 1.0,
-    basePriceApprox: 0.60,
+    basePriceApprox: 0.595,
   },
 ];
 
@@ -66,7 +66,7 @@ export const MINOR_PAIRS: ForexPair[] = [
     nickname: 'Chunnel',
     category: 'minor',
     baseSpread: 1.0,
-    basePriceApprox: 0.85,
+    basePriceApprox: 0.873,
   },
   {
     symbol: 'EUR/JPY',
@@ -74,7 +74,7 @@ export const MINOR_PAIRS: ForexPair[] = [
     nickname: 'Yuppy',
     category: 'minor',
     baseSpread: 1.2,
-    basePriceApprox: 167,
+    basePriceApprox: 185.50,
   },
   {
     symbol: 'EUR/CHF',
@@ -90,7 +90,7 @@ export const MINOR_PAIRS: ForexPair[] = [
     nickname: 'Guppy',
     category: 'minor',
     baseSpread: 1.8,
-    basePriceApprox: 197,
+    basePriceApprox: 212.50,
   },
   {
     symbol: 'GBP/CHF',
@@ -264,7 +264,7 @@ export const COMMODITY_PAIRS: ForexPair[] = [
     nickname: 'Gold',
     category: 'commodity',
     baseSpread: 3.0,
-    basePriceApprox: 2350,
+    basePriceApprox: 4840,
   },
   {
     symbol: 'XAG/USD',
@@ -272,7 +272,7 @@ export const COMMODITY_PAIRS: ForexPair[] = [
     nickname: 'Silver',
     category: 'commodity',
     baseSpread: 2.5,
-    basePriceApprox: 29.5,
+    basePriceApprox: 58.50,
   },
   {
     symbol: 'WTI/USD',
@@ -331,7 +331,7 @@ export const CRYPTO_PAIRS: ForexPair[] = [
     nickname: 'Bitcoin',
     category: 'crypto',
     baseSpread: 15.0,
-    basePriceApprox: 68500,
+    basePriceApprox: 71300,
   },
   {
     symbol: 'ETH/USD',
@@ -339,7 +339,7 @@ export const CRYPTO_PAIRS: ForexPair[] = [
     nickname: 'Ether',
     category: 'crypto',
     baseSpread: 5.0,
-    basePriceApprox: 3450,
+    basePriceApprox: 2230,
   },
   {
     symbol: 'SOL/USD',
@@ -439,7 +439,7 @@ export const INDEX_PAIRS: ForexPair[] = [
     nickname: 'S&P',
     category: 'index',
     baseSpread: 0.5,
-    basePriceApprox: 5250,
+    basePriceApprox: 6620,
   },
   {
     symbol: 'US100',

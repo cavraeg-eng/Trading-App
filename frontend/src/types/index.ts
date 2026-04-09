@@ -122,6 +122,27 @@ export interface SignalBreakdownData {
   timestamp: string;
 }
 
+export interface DetectedPattern {
+  name: string;
+  type: 'breakout' | 'breakdown' | 'continuation' | 'reversal';
+  direction: 'bullish' | 'bearish';
+  confidence: number;
+  targetPrice: number;
+  successRate: number;
+  description: string;
+}
+
+export interface AIScoreData {
+  value: number;
+  label: 'Strong' | 'Favorable' | 'Neutral' | 'Cautious';
+  factors: {
+    modelConfidence: number;
+    indicatorConsensus: number;
+    marketRegimeFit: number;
+    patternStrength: number;
+  };
+}
+
 export interface SentimentHeadline {
   title: string;
   source: string;

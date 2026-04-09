@@ -252,8 +252,9 @@ async def run_backtest(req: BacktestRequest):
 
     # Max drawdown
     rolling_max = equity_series.cummax()
-    drawdown = (equity_series - rolling_max) / rolling_max
-    max_drawdown = float(abs(drawdown.min())) if len(drawdown) > 0 else 0.0
+    drawdown = (equity_series - rolling_max) / rolling_max.replace(0, np.nan)
+    drawdown = drawdown.fillna(0.0)
+    max_drawdown = float(abs(drawdown.min())) if len(drawdown) > 0 and np.isfinite(drawdown.min()) else 0.0
 
     # Win rate
     winning = [t for t in trades if t["pnl"] > 0]

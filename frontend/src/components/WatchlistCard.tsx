@@ -81,7 +81,7 @@ export function WatchlistCard({ pairs, selectedPair, onPairChange }: WatchlistCa
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
-  }, [pairs.map(p => p.symbol).join(',')])
+  }, [pairs])
 
   return (
     <div className="bg-trading-card border border-trading-border rounded-lg p-4">

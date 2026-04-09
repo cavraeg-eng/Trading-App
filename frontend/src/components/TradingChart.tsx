@@ -1,88 +1,17 @@
-import { useEffect, useRef, useCallback } from 'react';
-import {
-  createChart,
-  ColorType,
-  CrosshairMode,
-  CandlestickSeries,
-  HistogramSeries,
-  createSeriesMarkers,
-  type IChartApi,
-  type ISeriesApi,
-  type CandlestickData,
-  type HistogramData,
-  type Time,
-  type IPriceLine,
-  type SeriesMarker,
-  type ISeriesMarkersPluginApi,
-} from 'lightweight-charts';
-import type { ForexPair, ChartSignalMarker, SignalStatus } from '../types';
+import { useEffect, useRef, memo, Component } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
+import type { ForexPair, ChartSignalMarker } from '../types';
+import { getTradingViewSymbol, getTradingViewInterval } from '../config/forexPairs';
 
-// ── Props ────────────────────────────────────────────────────────────────────
 interface TradingChartProps {
   pair: ForexPair;
-  /** Legacy prop used by Dashboard / ChartToolbar (values like '1m','5m','1H','4H','1D') */
   timeframe?: string;
-  /** Alternative interval prop ('1','5','15','60','240','D') */
   interval?: string;
-  /** Chart rendering type – kept for future compatibility */
   chartType?: 'candlestick' | 'line' | 'area';
-  /** Signal markers to visualise on the chart */
   signals?: ChartSignalMarker[];
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Normalise any timeframe/interval string coming from the toolbar or parent
- *  into the API query-param format the backend expects (e.g. '1m','5m','1h','4h','1d'). */
-function toApiTimeframe(raw: string): string {
-  const map: Record<string, string> = {
-    // interval-style values
-    '1': '1m',
-    '5': '5m',
-    '15': '15m',
-    '60': '1h',
-    '240': '4h',
-    'D': '1d',
-    // toolbar-style values (case-insensitive handled below)
-    '1m': '1m',
-    '5m': '5m',
-    '15m': '15m',
-    '30m': '30m',
-    '1h': '1h',
-    '1H': '1h',
-    '2h': '2h',
-    '4h': '4h',
-    '4H': '4h',
-    '1d': '1d',
-    '1D': '1d',
-  };
-  return map[raw] ?? map[raw.toLowerCase()] ?? '1h';
-}
-
-/** Convert pair symbol ("EUR/USD") to the slug the API expects ("EURUSD"). */
-function toApiSymbol(pair: ForexPair): string {
-  return pair.symbol.replace('/', '');
-}
-
-/** Map SignalStatus → colour */
-function statusColor(s: SignalStatus): string {
-  switch (s) {
-    case 'OPTIMAL_ENTRY':
-      return '#22c55e';
-    case 'VALID':
-      return '#3b82f6';
-    case 'ABOUT_TO_EXPIRE':
-      return '#f59e0b';
-    case 'EXPIRED':
-      return '#6b7280';
-    default:
-      return '#94a3b8';
-  }
-}
-
-// ── Component ────────────────────────────────────────────────────────────────
-
-export function TradingChart({
+function TradingChart({
   pair,
   timeframe = '1h',
   interval,
@@ -90,263 +19,202 @@ export function TradingChart({
   signals,
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<IChartApi | null>(null);
-  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
-  const priceLinesRef = useRef<IPriceLine[]>([]);
-  const candleDataRef = useRef<CandlestickData<Time>[]>([]);
-  const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const widgetRef = useRef<any>(null);
 
-  // Resolve the effective timeframe – prefer `interval` if supplied
-  const effectiveTf = interval ? interval : timeframe;
+  const effectiveTf = interval || timeframe;
+  const tvSymbol = getTradingViewSymbol(pair);
+  const tvInterval = getTradingViewInterval(effectiveTf);
+  const latestSignal = signals?.[0];
+  const formatPrice = (value: number) => value.toFixed(pair.basePriceApprox < 10 ? 4 : 2);
+  const signalTone =
+    latestSignal?.direction === 'BUY'
+      ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/15'
+      : latestSignal?.direction === 'SELL'
+        ? 'text-red-300 border-red-500/30 bg-red-500/15'
+        : 'text-slate-300 border-slate-500/30 bg-slate-500/15';
 
-  // ── 1. Chart creation & resize ──────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const container = containerRef.current;
-
-    const chart = createChart(container, {
-      width: container.clientWidth,
-      height: container.clientHeight,
-      layout: {
-        background: { type: ColorType.Solid, color: '#0f172a' },
-        textColor: '#94a3b8',
-      },
-      grid: {
-        vertLines: { color: '#1e293b' },
-        horzLines: { color: '#1e293b' },
-      },
-      crosshair: { mode: CrosshairMode.Normal },
-      timeScale: {
-        timeVisible: true,
-        secondsVisible: false,
-        borderColor: '#1e293b',
-      },
-      rightPriceScale: { borderColor: '#1e293b' },
-    });
-
-    const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: '#22c55e',
-      downColor: '#ef4444',
-      borderUpColor: '#22c55e',
-      borderDownColor: '#ef4444',
-      wickUpColor: '#22c55e',
-      wickDownColor: '#ef4444',
-    });
-
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      priceScaleId: 'volume',
-      priceFormat: { type: 'volume' },
-    });
-
-    // Push the volume pane to the bottom and keep it small
-    chart.priceScale('volume').applyOptions({
-      scaleMargins: { top: 0.85, bottom: 0 },
-    });
-
-    chartRef.current = chart;
-    candleSeriesRef.current = candleSeries;
-    volumeSeriesRef.current = volumeSeries;
-
-    // Create markers plugin for signal visualisation
-    const markersPlugin = createSeriesMarkers(candleSeries, []);
-    markersPluginRef.current = markersPlugin;
-
-    // Resize observer
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        chart.applyOptions({ width, height });
-      }
-    });
-    ro.observe(container);
-
-    return () => {
-      ro.disconnect();
-      if (markersPluginRef.current) {
-        markersPluginRef.current.detach();
-        markersPluginRef.current = null;
-      }
-      chart.remove();
-      chartRef.current = null;
-      candleSeriesRef.current = null;
-      volumeSeriesRef.current = null;
-      priceLinesRef.current = [];
-      candleDataRef.current = [];
-    };
-  }, []); // chart created once
-
-  // ── 2. Data fetching ────────────────────────────────────────────────────
-  useEffect(() => {
-    const chart = chartRef.current;
-    const candleSeries = candleSeriesRef.current;
-    const volumeSeries = volumeSeriesRef.current;
-    if (!chart || !candleSeries || !volumeSeries) return;
-
+    // Guard against StrictMode double-invocation: if the effect cleanup
+    // runs before the async script loads, `cancelled` prevents the stale
+    // closure from creating a second widget.
     let cancelled = false;
 
-    const fetchCandles = async () => {
-      const tf = toApiTimeframe(effectiveTf);
-      const sym = toApiSymbol(pair);
+    // Clear previous widget
+    const container = containerRef.current;
+    container.innerHTML = '';
 
-      try {
-        const res = await fetch(
-          `/api/market/candles/${encodeURIComponent(sym)}?timeframe=${tf}&limit=300`,
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data: { time: number; open: number; high: number; low: number; close: number; volume: number }[] =
-          await res.json();
+    // Load TradingView widget script if not already loaded
+    const scriptId = 'tradingview-widget-script';
+    let script = document.getElementById(scriptId) as HTMLScriptElement | null;
 
-        if (cancelled || !data?.length) return;
+    const createWidget = () => {
+      if (cancelled) return;
+      if (!containerRef.current || !(window as any).TradingView) return;
 
-        const candles: CandlestickData<Time>[] = data.map((c) => ({
-          time: c.time as Time,
-          open: c.open,
-          high: c.high,
-          low: c.low,
-          close: c.close,
-        }));
+      // Create a unique container ID
+      const containerId = `tv-chart-${Date.now()}`;
+      const widgetContainer = document.createElement('div');
+      widgetContainer.id = containerId;
+      widgetContainer.style.width = '100%';
+      widgetContainer.style.height = '100%';
+      containerRef.current.appendChild(widgetContainer);
 
-        const volumes: HistogramData<Time>[] = data.map((c) => ({
-          time: c.time as Time,
-          value: c.volume,
-          color: c.close >= c.open ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)',
-        }));
-
-        candleSeries.setData(candles);
-        volumeSeries.setData(volumes);
-        candleDataRef.current = candles;
-        chart.timeScale().fitContent();
-      } catch (err) {
-        console.error('[TradingChart] Failed to fetch candles:', err);
-      }
+      widgetRef.current = new (window as any).TradingView.widget({
+        container_id: containerId,
+        symbol: tvSymbol,
+        interval: tvInterval,
+        timezone: 'Etc/UTC',
+        theme: 'dark',
+        style: '1', // Candlestick
+        locale: 'en',
+        toolbar_bg: '#0f172a',
+        enable_publishing: false,
+        allow_symbol_change: false,
+        hide_top_toolbar: false,
+        hide_legend: false,
+        save_image: false,
+        autosize: true,
+        backgroundColor: '#0f172a',
+        gridColor: '#1e293b',
+        studies_overrides: {},
+        overrides: {
+          'mainSeriesProperties.candleStyle.upColor': '#22c55e',
+          'mainSeriesProperties.candleStyle.downColor': '#ef4444',
+          'mainSeriesProperties.candleStyle.borderUpColor': '#22c55e',
+          'mainSeriesProperties.candleStyle.borderDownColor': '#ef4444',
+          'mainSeriesProperties.candleStyle.wickUpColor': '#22c55e',
+          'mainSeriesProperties.candleStyle.wickDownColor': '#ef4444',
+          'paneProperties.background': '#0f172a',
+          'paneProperties.backgroundType': 'solid',
+          'paneProperties.vertGridProperties.color': '#1e293b',
+          'paneProperties.horzGridProperties.color': '#1e293b',
+          'scalesProperties.textColor': '#94a3b8',
+          'scalesProperties.lineColor': '#1e293b',
+        },
+        loading_screen: { backgroundColor: '#0f172a', foregroundColor: '#3b82f6' },
+        disabled_features: [
+          'use_localstorage_for_settings',
+          'header_symbol_search',
+          'header_compare',
+        ],
+        enabled_features: [
+          'hide_left_toolbar_by_default',
+        ],
+      });
     };
 
-    fetchCandles();
+    if (script && (window as any).TradingView) {
+      createWidget();
+    } else if (!script) {
+      script = document.createElement('script');
+      script.id = scriptId;
+      script.src = 'https://s3.tradingview.com/tv.js';
+      script.async = true;
+      script.onload = createWidget;
+      document.head.appendChild(script);
+    } else {
+      // Script exists but TradingView not loaded yet — wait
+      script.addEventListener('load', createWidget);
+    }
 
     return () => {
       cancelled = true;
-    };
-  }, [pair, effectiveTf]);
-
-  // ── 3. Signal visualisation ─────────────────────────────────────────────
-
-  /** Remove all existing price lines safely */
-  const clearPriceLines = useCallback(() => {
-    const series = candleSeriesRef.current;
-    if (!series) return;
-    for (const pl of priceLinesRef.current) {
-      try {
-        series.removePriceLine(pl);
-      } catch {
-        // already removed
+      if (widgetRef.current && typeof widgetRef.current.remove === 'function') {
+        try { widgetRef.current.remove(); } catch {}
       }
-    }
-    priceLinesRef.current = [];
-  }, []);
-
-  useEffect(() => {
-    const candleSeries = candleSeriesRef.current;
-    const markersPlugin = markersPluginRef.current;
-    if (!candleSeries || !markersPlugin) return;
-
-    // Always clean up previous price lines & markers before drawing new ones
-    clearPriceLines();
-
-    if (!signals || signals.length === 0) {
-      markersPlugin.setMarkers([]);
-      return;
-    }
-
-    const candles = candleDataRef.current;
-
-    // Helper: find the candle time closest to a given ISO timestamp
-    const closestTime = (iso: string): Time | null => {
-      if (!candles.length) return null;
-      const ts = Math.floor(new Date(iso).getTime() / 1000);
-      let best = candles[0].time;
-      let bestDiff = Math.abs((best as number) - ts);
-      for (const c of candles) {
-        const diff = Math.abs((c.time as number) - ts);
-        if (diff < bestDiff) {
-          bestDiff = diff;
-          best = c.time;
-        }
+      widgetRef.current = null;
+      if (containerRef.current) {
+        containerRef.current.innerHTML = '';
       }
-      return best;
     };
+  }, [tvSymbol, tvInterval]);
 
-    // ── Markers ───────────────────────────────────────────────────────────
-    const markers: SeriesMarker<Time>[] = [];
-
-    for (const sig of signals) {
-      const t = closestTime(sig.timestamp);
-      if (!t) continue;
-
-      const isBuy = sig.direction === 'BUY';
-      markers.push({
-        time: t,
-        position: isBuy ? 'belowBar' : 'aboveBar',
-        color: statusColor(sig.status),
-        shape: isBuy ? 'arrowUp' : 'arrowDown',
-        text: `${sig.direction} ${sig.confidence}%`,
-      });
-    }
-
-    // lightweight-charts requires markers sorted ascending by time
-    markers.sort((a, b) => (a.time as number) - (b.time as number));
-    markersPlugin.setMarkers(markers);
-
-    // ── Price lines for the most recent non-expired signal ─────────────
-    const activeSignal = [...signals]
-      .filter((s) => s.status !== 'EXPIRED')
-      .sort(
-        (a, b) =>
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-      )[0];
-
-    if (activeSignal) {
-      const lineDefaults = {
-        lineWidth: 1 as const,
-        lineStyle: 2 as const, // Dashed
-        axisLabelVisible: true,
-      };
-
-      const lines: { price: number; color: string; title: string }[] = [
-        { price: activeSignal.stopLoss, color: '#ef4444', title: 'SL' },
-        { price: activeSignal.entry, color: '#3b82f6', title: 'Entry' },
-        { price: activeSignal.takeProfit1, color: '#22c55e', title: 'TP1' },
-        { price: activeSignal.takeProfit2, color: '#16a34a', title: 'TP2' },
-        { price: activeSignal.takeProfit3, color: '#15803d', title: 'TP3' },
-      ];
-
-      for (const l of lines) {
-        const pl = candleSeries.createPriceLine({
-          price: l.price,
-          color: l.color,
-          title: l.title,
-          ...lineDefaults,
-        });
-        priceLinesRef.current.push(pl);
-      }
-    }
-
-    // Cleanup on signals change
-    return () => {
-      clearPriceLines();
-      markersPlugin.setMarkers([]);
-    };
-  }, [signals, clearPriceLines]);
-
-  // ── JSX ─────────────────────────────────────────────────────────────────
   return (
-    <div
-      ref={containerRef}
-      className="w-full h-full min-h-[400px]"
-      style={{ background: '#0f172a' }}
-    />
+    <div className="relative w-full h-full min-h-[400px]">
+      <div
+        ref={containerRef}
+        className="w-full h-full min-h-[400px]"
+        style={{ background: '#0f172a' }}
+      />
+      {latestSignal && latestSignal.direction !== 'HOLD' && (
+        <div className="pointer-events-none absolute top-3 right-3 z-10 max-w-[260px] rounded-lg border border-trading-border bg-slate-950/85 px-3 py-2 shadow-xl backdrop-blur-sm">
+          <div className="flex items-center justify-between gap-3">
+            <span className={`inline-flex items-center rounded-md border px-2 py-1 text-[11px] font-bold ${signalTone}`}>
+              {latestSignal.direction} · {latestSignal.confidence}%
+            </span>
+            <span className="text-[10px] font-semibold text-slate-400">
+              {latestSignal.status.replace(/_/g, ' ')}
+            </span>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+            <span className="text-slate-400">Entry</span>
+            <span className="text-right font-semibold text-slate-100">
+              {formatPrice(latestSignal.entryMin)} - {formatPrice(latestSignal.entryMax)}
+            </span>
+            <span className="text-slate-400">SL</span>
+            <span className="text-right font-semibold text-red-300">
+              {formatPrice(latestSignal.stopLoss)}
+            </span>
+            <span className="text-slate-400">TP1</span>
+            <span className="text-right font-semibold text-emerald-300">
+              {formatPrice(latestSignal.takeProfit1)}
+            </span>
+            <span className="text-slate-400">TP2</span>
+            <span className="text-right font-semibold text-emerald-300">
+              {formatPrice(latestSignal.takeProfit2)}
+            </span>
+            <span className="text-slate-400">TP3</span>
+            <span className="text-right font-semibold text-emerald-300">
+              {formatPrice(latestSignal.takeProfit3)}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
-export default TradingChart;
+export default memo(TradingChart);
+// Named export for compatibility
+export { TradingChart };
+
+class ChartErrorBoundary extends Component<
+  { children: ReactNode; onRetry?: () => void },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: any) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('Chart error:', error, errorInfo)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="w-full h-full min-h-[400px] flex items-center justify-center bg-slate-900 rounded-lg">
+          <div className="text-center">
+            <p className="text-slate-400 mb-2">Chart unavailable</p>
+            <button
+              onClick={() => this.setState({ hasError: false, error: null })}
+              className="px-4 py-2 bg-trading-accent text-white rounded-lg text-sm hover:bg-blue-600 transition-colors"
+            >
+              Click to retry
+            </button>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+export { ChartErrorBoundary };

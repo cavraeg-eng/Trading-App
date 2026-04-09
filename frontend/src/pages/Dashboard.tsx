@@ -1,16 +1,19 @@
-import { useState, useEffect, useCallback } from 'react'
-import { TrendingUp, TrendingDown, Activity, Clock, Zap, Loader2 } from 'lucide-react'
-import type { AccountMetrics, ForexPair, AIRecommendation, ChartSignalMarker, SignalStatus } from '../types'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { TrendingUp, TrendingDown, Activity, Zap, Loader2 } from 'lucide-react'
+import type { AccountMetrics, ForexPair, AIRecommendation, ChartSignalMarker, SignalStatus, AIScoreData, DetectedPattern } from '../types'
+import { getPairBySymbol } from '../config/forexPairs'
 import { PairSelector } from '../components/PairSelector'
 import { ChartToolbar } from '../components/ChartToolbar'
-import { TradingChart } from '../components/TradingChart'
+import { TradingChart, ChartErrorBoundary } from '../components/TradingChart'
 import { AIRecommendations, fetchRecommendations } from '../components/AIRecommendations'
 import { PairHeatmap } from '../components/PairHeatmap'
 import { SentimentPanel } from '../components/SentimentPanel'
 import { SentimentHeatmap } from '../components/SentimentHeatmap'
-import { TradeExecutionPanel } from '../components/TradeExecutionPanel'
+import { AITradingHub } from '../components/AITradingHub'
 import WatchlistCard from '../components/WatchlistCard'
 import EconomicCalendar from '../components/EconomicCalendar'
+import { GoldScalperPro } from '../components/GoldScalperPro'
+import type { ScalpTradeData } from '../components/GoldScalperPro'
 
 interface DashboardProps {
   selectedPair: ForexPair
@@ -45,11 +48,15 @@ interface SignalDetails {
   timeframe: Timeframe
   marketRegime: MarketRegime
   indicators: { name: string; value: string; signal: 'bullish' | 'bearish' | 'neutral' }[]
+  aiScore?: AIScoreData
+  patterns?: DetectedPattern[]
+  patternAccuracy?: number | null
 }
 
 function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defaultPairSymbol, onSetDefaultPair }: DashboardProps) {
   // Chart state
   const [timeframe, setTimeframe] = useState<string>('1h')
+  const goldPair = useMemo(() => getPairBySymbol('XAU/USD') ?? selectedPair, [selectedPair])
   
   // AI Recommendations state
   const [showAIRecommendations, setShowAIRecommendations] = useState(false)
@@ -66,6 +73,48 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
   const [chartSignals, setChartSignals] = useState<ChartSignalMarker[]>([])
   const [signalStatus, setSignalStatus] = useState<SignalStatus | null>(null)
   const [multiTimeframe, setMultiTimeframe] = useState<MultiTimeframeData[]>([])
+  const [lastSuccessfulFetch, setLastSuccessfulFetch] = useState<number>(Date.now())
+  const [fetchError, setFetchError] = useState<string | null>(null)
+  const [quoteSource, setQuoteSource] = useState<'live' | 'mock' | 'unknown'>('unknown')
+
+  const effectiveAnalysisTimeframe = useMemo(() => {
+    if (tradeStyle === 'scalp') {
+      if (timeframe === '1m' || timeframe === '5m') return timeframe
+      return '1m'
+    }
+    return timeframe
+  }, [timeframe, tradeStyle])
+
+  const quoteTimeframe = useMemo(() => {
+    if (tradeStyle === 'scalp') return timeframe === '5m' ? '5m' : '1m'
+    if (timeframe === '1m' || timeframe === '5m' || timeframe === '15m') return timeframe
+    return '1m'
+  }, [timeframe, tradeStyle])
+
+  const fetchIntervalMs = (() => {
+    if (tradeStyle === 'scalp') return 5000
+    if (timeframe === '1m' || timeframe === '5m') return 5000
+    if (timeframe === '15m') return 10000
+    return 30000
+  })()
+
+  const dataFreshness = useMemo<'live' | 'delayed' | 'stale'>(() => {
+    const ageSeconds = Math.max(0, Math.round((Date.now() - lastSuccessfulFetch) / 1000))
+    if (ageSeconds <= Math.max(6, Math.round(fetchIntervalMs / 1000) + 1)) return 'live'
+    if (ageSeconds <= 20) return 'delayed'
+    return 'stale'
+  }, [lastSuccessfulFetch, fetchIntervalMs])
+
+  // Ref to avoid stale closure for currentPrice in callbacks
+  const currentPriceRef = useRef(currentPrice)
+  useEffect(() => { currentPriceRef.current = currentPrice }, [currentPrice])
+
+  // Copy trading state
+  const [copyTradingEnabled, setCopyTradingEnabled] = useState(false)
+  const [copiedPositions, setCopiedPositions] = useState<any[]>([])
+  const [copyStats, setCopyStats] = useState<any>(null)
+  const [copyTradeLoading, setCopyTradeLoading] = useState(false)
+
   const [signalDetails, setSignalDetails] = useState<SignalDetails>({
     signal: 'hold',
     confidence: 50,
@@ -78,7 +127,10 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
     riskReward: 2.0,
     timeframe: '1h',
     marketRegime: 'ranging',
-    indicators: []
+    indicators: [],
+    aiScore: undefined,
+    patterns: [],
+    patternAccuracy: null,
   })
   
 
@@ -94,17 +146,48 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
     totalTrades: 127,
   })
 
-  // Fetch real market analysis when pair or timeframe changes
+  // Fast quote polling keeps hero price reactive even when full analysis is slower.
   useEffect(() => {
-    const fetchAnalysis = async () => {
+    const fetchQuote = async () => {
+      try {
+        const res = await fetch(`/api/market/quote/${encodeURIComponent(selectedPair.symbol)}?timeframe=${quoteTimeframe}`)
+        if (!res.ok) return
+        const data = await res.json()
+        setCurrentPrice(data.currentPrice)
+        setPriceChange(data.priceChange)
+        setPriceChangePercent(data.priceChangePercent)
+        setQuoteSource(data.source ?? 'unknown')
+        setLastSuccessfulFetch(Date.now())
+        setFetchError(null)
+      } catch {
+        setFetchError('Unable to refresh live quote')
+      }
+    }
+
+    fetchQuote()
+    const interval = setInterval(fetchQuote, fetchIntervalMs)
+    return () => clearInterval(interval)
+  }, [selectedPair, quoteTimeframe, fetchIntervalMs])
+
+  useEffect(() => {
+    if (tradeStyle === 'scalp' && timeframe !== '1m' && timeframe !== '5m') {
+      setTimeframe('1m')
+    }
+  }, [tradeStyle, timeframe])
+
+  // Fetch full market analysis when pair or timeframe changes
+  useEffect(() => {
+    const fetchAllData = async () => {
       setIsLoading(true)
       try {
-        const res = await fetch(`/api/market/analysis/${encodeURIComponent(selectedPair.symbol)}?timeframe=${timeframe}&trade_style=${tradeStyle}`)
-        if (res.ok) {
-          const data = await res.json()
-          setCurrentPrice(data.currentPrice)
-          setPriceChange(data.priceChange)
-          setPriceChangePercent(data.priceChangePercent)
+        const [analysisRes, signalRes] = await Promise.allSettled([
+          fetch(`/api/market/analysis/${encodeURIComponent(selectedPair.symbol)}?timeframe=${effectiveAnalysisTimeframe}&trade_style=${tradeStyle}`),
+          fetch(`/api/signals/breakdown/${encodeURIComponent(selectedPair.symbol)}?timeframe=${effectiveAnalysisTimeframe || '1h'}`)
+        ])
+
+        // Process analysis result
+        if (analysisRes.status === 'fulfilled' && analysisRes.value.ok) {
+          const data = await analysisRes.value.json()
           setSignalDetails({
             signal: data.signal,
             confidence: data.confidence,
@@ -118,26 +201,18 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
             timeframe: data.timeframe,
             marketRegime: data.marketRegime,
             indicators: data.indicators,
+            aiScore: data.aiScore,
+            patterns: data.patterns || [],
+            patternAccuracy: data.patternAccuracy ?? null,
           })
           if (data.multiTimeframe) {
             setMultiTimeframe(data.multiTimeframe)
           }
-        } else {
-          console.warn('Failed to fetch analysis:', res.status)
         }
-      } catch (err) {
-        console.error('Failed to fetch analysis:', err)
-        // Keep existing data on error
-      } finally {
-        setIsLoading(false)
-      }
-    }
-    const fetchSignalBreakdown = async () => {
-      try {
-        const selectedTimeframe = timeframe || '1h'
-        const res = await fetch(`/api/signals/breakdown/${encodeURIComponent(selectedPair.symbol)}?timeframe=${selectedTimeframe}`)
-        if (res.ok) {
-          const data = await res.json()
+
+        // Process signal breakdown result
+        if (signalRes.status === 'fulfilled' && signalRes.value.ok) {
+          const data = await signalRes.value.json()
           const marker: ChartSignalMarker = {
             entry: (data.entry_min + data.entry_max) / 2,
             entryMin: data.entry_min,
@@ -156,23 +231,50 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
           setChartSignals([marker])
           setSignalStatus(data.signal_status || 'VALID')
         }
+
+        setLastSuccessfulFetch(Date.now())
+        setFetchError(null)
       } catch (err) {
-        console.error('Failed to fetch signal breakdown:', err)
+        console.error('Failed to fetch data:', err)
+        setFetchError('Unable to refresh market data')
+      } finally {
+        setIsLoading(false)
       }
     }
 
-    fetchAnalysis()
-    fetchSignalBreakdown()
-    // Refresh every 30 seconds
-    const interval = setInterval(() => {
-      fetchAnalysis()
-      fetchSignalBreakdown()
-    }, 30000)
+    fetchAllData()
+    const interval = setInterval(fetchAllData, fetchIntervalMs)
     return () => clearInterval(interval)
-  }, [selectedPair, timeframe, tradeStyle])
+  }, [selectedPair, effectiveAnalysisTimeframe, tradeStyle, fetchIntervalMs])
 
+  // Fetch copy trading data when enabled
+  useEffect(() => {
+    if (!copyTradingEnabled) return
 
-  // Handle AI Suggest
+    const fetchCopyData = async () => {
+      try {
+        const [posRes, statsRes] = await Promise.all([
+          fetch('/api/copy-trading/positions'),
+          fetch('/api/copy-trading/stats'),
+        ])
+        if (posRes.ok) {
+          const posData = await posRes.json()
+          setCopiedPositions(posData.positions || [])
+        }
+        if (statsRes.ok) {
+          const statsData = await statsRes.json()
+          setCopyStats(statsData)
+        }
+      } catch (err) {
+        console.error('Failed to fetch copy trading data:', err)
+      }
+    }
+
+    fetchCopyData()
+    const interval = setInterval(fetchCopyData, 10000)
+    return () => clearInterval(interval)
+  }, [copyTradingEnabled])
+
   const handleAISuggest = useCallback(async () => {
     const recs = await fetchRecommendations(activePairs)
     setRecommendations(recs)
@@ -236,6 +338,128 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
   const handleBuy = () => placeOrder('buy')
 
   const handleSell = () => placeOrder('sell')
+
+  const handleToggleCopyTrading = useCallback(async (enabled: boolean) => {
+    try {
+      const res = await fetch('/api/copy-trading/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+      if (res.ok) {
+        setCopyTradingEnabled(enabled)
+        if (!enabled) {
+          setCopiedPositions([])
+          setCopyStats(null)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to update copy trading settings:', err)
+    }
+  }, [])
+
+  const handleCopySignal = useCallback(async () => {
+    setCopyTradeLoading(true)
+    try {
+      const entryMid = (signalDetails.entryRange.min + signalDetails.entryRange.max) / 2
+      const pipSz = selectedPair.basePriceApprox < 10 ? 0.0001 : selectedPair.basePriceApprox < 200 ? 0.01 : selectedPair.basePriceApprox < 5000 ? 0.10 : 1.0
+      const stopDist = Math.abs(entryMid - signalDetails.stopLoss)
+      const stopPips = stopDist / pipSz
+      const pipValue = selectedPair.basePriceApprox < 10 ? 10 : 1
+      const riskAmount = metrics.balance * 0.01
+      const quantity = stopPips > 0 ? riskAmount / (stopPips * pipValue) : 0.01
+
+      const res = await fetch('/api/copy-trading/copy-signal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: selectedPair.symbol,
+          direction: signalDetails.signal.includes('buy') ? 'BUY' : 'SELL',
+          quantity: Math.round(quantity * 100) / 100,
+          entry_price: currentPriceRef.current,
+          stop_loss: signalDetails.stopLoss,
+          take_profit1: signalDetails.takeProfit1,
+          take_profit2: signalDetails.takeProfit2,
+          take_profit3: signalDetails.takeProfit3,
+          confidence: signalDetails.confidence,
+          risk_percent: 1.0,
+          trade_style: tradeStyle,
+          timeframe: timeframe,
+        }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setTradeStatus({ type: 'success', message: data.message })
+        const posRes = await fetch('/api/copy-trading/positions')
+        if (posRes.ok) {
+          const posData = await posRes.json()
+          setCopiedPositions(posData.positions || [])
+        }
+      } else {
+        setTradeStatus({ type: 'error', message: data.detail || 'Copy trade failed' })
+      }
+    } catch (err) {
+      setTradeStatus({ type: 'error', message: 'Failed to copy signal' })
+    } finally {
+      setCopyTradeLoading(false)
+      setTimeout(() => setTradeStatus(null), 5000)
+    }
+  }, [selectedPair, signalDetails, currentPrice, tradeStyle, timeframe, metrics.balance])
+
+  const handleCloseCopyTrade = useCallback(async (copyTradeId: string) => {
+    try {
+      const res = await fetch(`/api/copy-trading/close/${copyTradeId}`, { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        setTradeStatus({ type: 'success', message: `Closed copy trade: ${data.realized_pnl >= 0 ? '+' : ''}$${data.realized_pnl.toFixed(2)}` })
+        setCopiedPositions(prev => prev.filter(p => p.copy_trade_id !== copyTradeId))
+      }
+    } catch (err) {
+      setTradeStatus({ type: 'error', message: 'Failed to close copy trade' })
+    }
+    setTimeout(() => setTradeStatus(null), 5000)
+  }, [])
+
+  const handleScalpTrade = useCallback(async (side: 'buy' | 'sell', data: ScalpTradeData) => {
+    setTradeStatus(null)
+    try {
+      const res = await fetch('/api/trading/paper-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: data.symbol,
+          side,
+          quantity: Math.round(data.quantity * 100) / 100,
+          order_type: 'market',
+          price: data.price,
+          stop_loss: data.stopLoss,
+          take_profit_1: data.takeProfit1,
+          take_profit_2: data.takeProfit2,
+          risk_percent: data.riskPercent,
+          trade_style: 'scalp',
+          confidence: data.confidence,
+          timeframe: data.timeframe,
+        })
+      })
+      const result = await res.json()
+      if (res.ok && result.success) {
+        setTradeStatus({ type: 'success', message: `Scalp ${side.toUpperCase()} executed: ${data.symbol}` })
+      } else {
+        setTradeStatus({ type: 'error', message: result.detail || 'Scalp order failed' })
+      }
+    } catch {
+      setTradeStatus({ type: 'error', message: 'Network error placing scalp order' })
+    }
+    setTimeout(() => setTradeStatus(null), 5000)
+  }, [])
+
+  const handleActivateGoldMode = useCallback((nextTimeframe: '1m' | '5m') => {
+    if (goldPair.symbol === 'XAU/USD' && selectedPair.symbol !== 'XAU/USD') {
+      onPairChange(goldPair)
+    }
+    setTradeStyle('scalp')
+    setTimeframe(nextTimeframe)
+  }, [goldPair, onPairChange, selectedPair.symbol])
 
   const getRegimeIcon = (regime: MarketRegime) => {
     switch (regime) {
@@ -304,6 +528,20 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Left Main Content - Chart Area (~70-75% on large screens) */}
         <div className="lg:col-span-3 space-y-4">
+          {/* TradingView Data Status */}
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-trading-card border border-trading-border rounded-md text-xs text-slate-300">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="font-medium">TradingView Live</span>
+            <span className="text-slate-500">· Real-time market data</span>
+          </div>
+
+          {fetchError && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/10 border border-yellow-500/30 rounded-md text-xs text-yellow-400">
+              <span className="w-2 h-2 rounded-full bg-yellow-400" />
+              <span>{fetchError} — last updated {Math.round((Date.now() - lastSuccessfulFetch) / 1000)}s ago</span>
+            </div>
+          )}
+
           {/* Chart Toolbar */}
           <ChartToolbar
             timeframe={timeframe}
@@ -313,11 +551,13 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
           {/* Trading Chart - TradingView Widget */}
           <div className="bg-trading-card border border-trading-border rounded-lg p-4">
             <div className="h-[500px]">
-              <TradingChart
-                pair={selectedPair}
-                timeframe={timeframe}
-                signals={chartSignals}
-              />
+              <ChartErrorBoundary>
+                <TradingChart
+                  pair={selectedPair}
+                  timeframe={timeframe}
+                  signals={chartSignals}
+                />
+              </ChartErrorBoundary>
             </div>
           </div>
 
@@ -334,7 +574,7 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
           )}
 
           {/* Unified Trading Signal Card - Full Width */}
-          <TradeExecutionPanel
+          <AITradingHub
             signalDetails={signalDetails}
             currentPrice={currentPrice}
             priceChange={priceChange}
@@ -347,68 +587,20 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
             tradeStyle={tradeStyle}
             onTradeStyleChange={setTradeStyle}
             signalStatus={signalStatus ?? undefined}
+            multiTimeframe={multiTimeframe}
+            copyTradingEnabled={copyTradingEnabled}
+            onToggleCopyTrading={handleToggleCopyTrading}
+            copiedPositions={copiedPositions}
+            copyStats={copyStats}
+            onCopySignal={handleCopySignal}
+            onCloseCopyTrade={handleCloseCopyTrade}
+            copyTradeLoading={copyTradeLoading}
+            dataFreshness={dataFreshness}
+            lastUpdatedMs={lastSuccessfulFetch}
+            quoteSource={quoteSource}
+            activeTimeframe={quoteTimeframe}
           />
 
-          {/* Technical Indicators Display */}
-          <div className="bg-trading-card border border-trading-border rounded-lg p-4">
-            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-              <Activity size={16} />
-              Technical Indicators
-            </h3>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-              {signalDetails.indicators.map((ind, i) => (
-                <div key={i} className="p-2 bg-trading-bg rounded-lg text-center">
-                  <span className="text-xs text-trading-muted block">{ind.name}</span>
-                  <span className="text-sm font-medium block">{ind.value}</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                    ind.signal === 'bullish' ? 'bg-emerald-500/20 text-emerald-400' :
-                    ind.signal === 'bearish' ? 'bg-red-500/20 text-red-400' :
-                    'bg-yellow-500/20 text-yellow-400'
-                  }`}>
-                    {ind.signal.toUpperCase()}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Multi-Timeframe Analysis */}
-          <div className="bg-trading-card border border-trading-border rounded-lg p-4">
-            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-              <Clock size={16} />
-              Multi-Timeframe Analysis
-            </h3>
-            <div className="grid grid-cols-5 gap-2">
-              {(multiTimeframe.length > 0 ? multiTimeframe : [
-                { tf: '1D', signal: 'HOLD' as const, alignment: 50 },
-                { tf: '4H', signal: 'HOLD' as const, alignment: 50 },
-                { tf: '1H', signal: 'HOLD' as const, alignment: 50 },
-                { tf: '15M', signal: 'HOLD' as const, alignment: 50 },
-                { tf: '5M', signal: 'HOLD' as const, alignment: 50 },
-              ]).map((item, i) => (
-                <div key={i} className="p-2 bg-trading-bg rounded-lg text-center">
-                  <span className="text-xs font-medium block mb-1">{item.tf}</span>
-                  <div className="h-1.5 bg-trading-card rounded-full overflow-hidden mb-1">
-                    <div 
-                      className={`h-full rounded-full ${
-                        item.alignment > 60 ? 'bg-emerald-500' :
-                        item.alignment > 40 ? 'bg-yellow-500' :
-                        'bg-red-500'
-                      }`}
-                      style={{ width: `${item.alignment}%` }}
-                    />
-                  </div>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                    item.signal === 'BUY' ? 'bg-emerald-500/20 text-emerald-400' :
-                    item.signal === 'SELL' ? 'bg-red-500/20 text-red-400' :
-                    'bg-yellow-500/20 text-yellow-400'
-                  }`}>
-                    {item.signal}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
 
 
           {/* Watchlist & Economic Calendar */}
@@ -467,35 +659,15 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
             </div>
           </div>
 
-          {/* Signal Analysis */}
-          <div className="bg-trading-card border border-trading-border rounded-lg p-4">
-            <h3 className="text-sm font-semibold mb-3">Analysis</h3>
-            <p className="text-xs text-trading-muted leading-relaxed mb-3">{signalDetails.reason}</p>
-            {/* Indicator Consensus */}
-            {signalDetails.indicators.length > 0 && (() => {
-              const bullish = signalDetails.indicators.filter(i => i.signal === 'bullish').length
-              const bearish = signalDetails.indicators.filter(i => i.signal === 'bearish').length
-              const neutral = signalDetails.indicators.filter(i => i.signal === 'neutral').length
-              const total = signalDetails.indicators.length
-              return (
-                <div>
-                  <span className="text-[10px] text-trading-muted uppercase tracking-wide">Indicator Consensus</span>
-                  <div className="h-2 bg-trading-bg rounded-full overflow-hidden flex mt-1 mb-1">
-                    <div className="h-full bg-emerald-500 transition-all duration-500" style={{ width: `${(bullish / total) * 100}%` }} />
-                    <div className="h-full bg-red-500 transition-all duration-500" style={{ width: `${(bearish / total) * 100}%` }} />
-                    <div className="h-full bg-gray-500 transition-all duration-500" style={{ width: `${(neutral / total) * 100}%` }} />
-                  </div>
-                  <div className="flex justify-between text-[10px]">
-                    <span className="text-emerald-400">{bullish} Bullish</span>
-                    <span className="text-red-400">{bearish} Bearish</span>
-                    <span className="text-gray-400">{neutral} Neutral</span>
-                  </div>
-                </div>
-              )
-            })()}
-          </div>
         </div>
       </div>
+
+      {/* MIDAS Gold Scalper Pro — floating widget */}
+      <GoldScalperPro
+        accountBalance={metrics.balance}
+        onExecuteTrade={handleScalpTrade}
+        onActivateGoldMode={handleActivateGoldMode}
+      />
     </div>
   )
 }

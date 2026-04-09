@@ -12,7 +12,8 @@ interface SentimentOverviewItem {
   label: 'bullish' | 'bearish' | 'neutral';
 }
 
-const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
+// Use relative URLs so the Vite proxy handles routing to the backend
+const API_URL = '';
 
 // Map sentiment symbols to ForexPair objects
 const SYMBOL_TO_PAIR: Record<string, Partial<ForexPair>> = {

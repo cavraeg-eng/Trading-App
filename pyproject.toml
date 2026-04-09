@@ -109,6 +109,6 @@ warn_unused_ignores = true
 show_error_codes = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["trading_bot/tests", "."]
 asyncio_mode = "auto"
 addopts = "-v --tb=short"

@@ -91,6 +91,7 @@ function LiveTrading({ selectedPair, onPairChange, activePairs, recentPairs: _re
   })
   const [isPlacingOrder, setIsPlacingOrder] = useState(false)
   const [orderMessage, setOrderMessage] = useState<{type: 'success' | 'error', message: string} | null>(null)
+  const [brokerError, setBrokerError] = useState<string | null>(null)
 
   const mockOrderBook = useMemo(() => generateMockOrderBook(selectedPair), [selectedPair])
   const mockActivity = useMemo(() => generateMockActivity(selectedPair), [selectedPair])
@@ -130,10 +131,12 @@ function LiveTrading({ selectedPair, onPairChange, activePairs, recentPairs: _re
         if (data) {
           setActiveBroker(data)
           setIsConnected(data.connected)
+          setBrokerError(null)
         }
       }
     } catch (error) {
       console.error('Failed to fetch active broker:', error)
+      setBrokerError('Unable to connect to broker. Please check your connection settings.')
     }
   }
 
@@ -267,6 +270,16 @@ function LiveTrading({ selectedPair, onPairChange, activePairs, recentPairs: _re
           </div>
         </div>
       </header>
+
+      {/* Broker Error Banner */}
+      {brokerError && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 mb-4 flex items-center justify-between text-sm">
+          <span className="text-red-400">{brokerError}</span>
+          <button onClick={() => { setBrokerError(null); fetchActiveBroker(); }} className="text-red-400 hover:text-red-300 text-xs font-medium">
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Order Message */}
       {orderMessage && (

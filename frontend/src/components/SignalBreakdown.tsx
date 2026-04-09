@@ -250,11 +250,22 @@ export function SignalBreakdown({ symbol, signalData, signalStatus }: SignalBrea
       
       const apiData = await response.json()
       
-      // Transform API data to match our interface
-      setData({
-        ...apiData,
-        explanation: apiData.explanation || generateMockBreakdown(symbol).explanation
-      })
+      // Transform API data to match our interface (snake_case → camelCase + type normalization)
+      const fallbackExplanation = generateMockBreakdown(symbol).explanation
+      const normalized: SignalBreakdownData = {
+        symbol: apiData.symbol,
+        direction: apiData.direction,
+        confidence: apiData.confidence,
+        signalStrength: apiData.signal_strength ?? apiData.signalStrength,
+        indicators: (apiData.indicators || []).map((ind: any) => ({
+          ...ind,
+          value: typeof ind.value === 'string' ? parseFloat(ind.value) || 0 : ind.value,
+        })),
+        patternAccuracy: apiData.pattern_accuracy ?? apiData.patternAccuracy,
+        explanation: apiData.explanation || fallbackExplanation,
+        timestamp: apiData.timestamp,
+      }
+      setData(normalized)
     } catch (err) {
       // Fallback to mock data
       console.log('Using mock data for signal breakdown')
@@ -420,7 +431,10 @@ export function SignalBreakdown({ symbol, signalData, signalStatus }: SignalBrea
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium text-trading-text">{indicator.name}</span>
                       <span className="text-xs text-trading-muted">
-                        {indicator.value.toFixed(indicator.value < 10 ? 4 : 2)}
+                        {(() => {
+                          const numVal = typeof indicator.value === 'number' ? indicator.value : parseFloat(String(indicator.value)) || 0;
+                          return numVal.toFixed(numVal < 10 ? 4 : 2);
+                        })()}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 mt-1">

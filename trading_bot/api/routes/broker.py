@@ -127,10 +127,10 @@ async def get_broker_status(broker_id: str) -> dict:
         "broker_id": broker_id,
         "connected": is_connected,
         "is_active": status["is_active"],
-        "latency_ms": round(random.uniform(15, 150), 2) if is_connected else None,
+        "latency_ms": 45.0 if is_connected else None,
         "last_ping": datetime.now().isoformat() if is_connected else None,
         "api_version": "v3" if is_connected else None,
-        "rate_limit_remaining": random.randint(800, 1200) if is_connected else 0
+        "rate_limit_remaining": 1000 if is_connected else 0
     }
 
 
@@ -232,8 +232,8 @@ async def get_positions(
                 "current_price": pos.current_price,
                 "unrealized_pnl": round(pos.unrealized_pnl, 2),
                 "unrealized_pnl_pct": round(
-                    (pos.unrealized_pnl / (pos.entry_price * pos.quantity)) * 100, 2
-                ) if pos.entry_price > 0 and pos.quantity > 0 else 0,
+                    (pos.unrealized_pnl / denom) * 100, 2
+                ) if (denom := pos.entry_price * pos.quantity) > 0 else 0.0,
             })
     else:
         # Get positions from all connected brokers
@@ -252,29 +252,11 @@ async def get_positions(
                         "current_price": pos.current_price,
                         "unrealized_pnl": round(pos.unrealized_pnl, 2),
                         "unrealized_pnl_pct": round(
-                            (pos.unrealized_pnl / (pos.entry_price * pos.quantity)) * 100, 2
-                        ) if pos.entry_price > 0 and pos.quantity > 0 else 0,
+                            (pos.unrealized_pnl / denom) * 100, 2
+                        ) if (denom := pos.entry_price * pos.quantity) > 0 else 0.0,
                     })
 
-    # Generate mock positions if empty (for demo purposes)
-    if not positions:
-        mock_symbols = ["BTC/USDT", "ETH/USDT", "EUR/USD"]
-        for sym in mock_symbols[:2]:
-            qty = random.uniform(0.1, 2.0) if "BTC" in sym else random.uniform(1, 50)
-            entry = round(random.uniform(100, 50000), 2)
-            current = round(entry * random.uniform(0.95, 1.05), 2)
-
-            positions.append({
-                "symbol": sym,
-                "broker_id": broker_id or "binance",
-                "quantity": round(qty, 4),
-                "side": "long",
-                "avg_entry": entry,
-                "current_price": current,
-                "unrealized_pnl": round((current - entry) * qty, 2),
-                "unrealized_pnl_pct": round(((current - entry) / entry) * 100, 2),
-            })
-
+    # Return actual positions only — no mock data
     return positions
 
 
@@ -284,29 +266,16 @@ async def get_orders(
     status: Optional[str] = Query(None, description="Filter by status: open, filled, cancelled")
 ) -> List[dict]:
     """Get order history."""
-    # For now, return mock orders since we don't have persistent order storage
+    # Return empty list when no persistent order storage is configured
     orders = []
 
-    # Add some mock orders
-    for i in range(5):
-        orders.append({
-            "order_id": f"MOCK{i+1:03d}",
-            "broker_id": broker_id or random.choice(["binance", "oanda", "alpaca"]),
-            "symbol": random.choice(["BTC/USDT", "ETH/USDT", "EUR/USD", "GBP/USD", "AAPL"]),
-            "side": random.choice(["buy", "sell"]),
-            "quantity": round(random.uniform(0.1, 5.0), 4),
-            "order_type": random.choice(["market", "limit"]),
-            "status": random.choice(["filled", "open", "cancelled"]),
-            "filled_quantity": round(random.uniform(0.1, 5.0), 4),
-            "timestamp": datetime.now().isoformat()
-        })
-
     if broker_id:
-        orders = [o for o in orders if o["broker_id"] == broker_id]
-    if status:
-        orders = [o for o in orders if o["status"] == status]
+        # Query from broker if connected
+        status_info = broker_manager.get_broker_status(broker_id)
+        if status_info["connected"]:
+            pass  # TODO: fetch real orders from broker API
 
-    return sorted(orders, key=lambda x: x["timestamp"], reverse=True)
+    return orders
 
 
 @router.get("/balance/{broker_id}")
@@ -327,20 +296,16 @@ async def get_balance(broker_id: str) -> dict:
     balance = await broker_manager.get_balance(broker_id)
 
     if not balance:
-        # Return mock balance
+        # Return unavailable state instead of mock data
         return {
             "broker_id": broker_id,
             "connected": True,
-            "total_equity": round(random.uniform(5000, 100000), 2),
-            "available_margin": round(random.uniform(2000, 50000), 2),
-            "used_margin": round(random.uniform(1000, 20000), 2),
+            "status": "balance_unavailable",
+            "total_equity": None,
+            "available_margin": None,
+            "used_margin": None,
             "currency": "USD",
-            "balances": [
-                {"asset": "USD", "free": round(random.uniform(1000, 50000), 2), "locked": round(random.uniform(100, 1000), 2)},
-                {"asset": "BTC", "free": round(random.uniform(0.1, 2.0), 6), "locked": 0},
-                {"asset": "ETH", "free": round(random.uniform(1, 20), 4), "locked": 0},
-                {"asset": "USDT", "free": round(random.uniform(1000, 20000), 2), "locked": round(random.uniform(100, 500), 2)},
-            ]
+            "balances": []
         }
 
     return {

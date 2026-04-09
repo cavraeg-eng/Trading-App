@@ -69,13 +69,25 @@ export default function Social() {
     }
   };
 
+  const sanitizeText = (text: string, maxLength: number = 500): string => {
+    return text
+      .replace(/<[^>]*>/g, '')  // Strip HTML tags
+      .replace(/[<>"'&]/g, '')   // Remove dangerous chars
+      .trim()
+      .slice(0, maxLength)
+  };
+
   const handleShareSignal = async () => {
+    // Sanitize text fields before submission
+    const sanitizedSymbol = sanitizeText(shareForm.symbol, 20);
+    if (!sanitizedSymbol) return;
+
     try {
       const response = await fetch('/api/social/share', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          symbol: shareForm.symbol,
+          symbol: sanitizedSymbol,
           direction: shareForm.direction,
           confidence: shareForm.confidence / 100,
           entry_price: shareForm.entryPrice,

@@ -5,7 +5,14 @@ interface ChartToolbarProps {
   onTimeframeChange: (tf: string) => void;
 }
 
-const TIMEFRAMES = ['1m', '5m', '15m', '1H', '4H', '1D'];
+const TIMEFRAMES = [
+  { label: '1m', value: '1m' },
+  { label: '5m', value: '5m' },
+  { label: '15m', value: '15m' },
+  { label: '1H', value: '1h' },
+  { label: '4H', value: '4h' },
+  { label: '1D', value: '1d' },
+];
 
 export function ChartToolbar({
   timeframe,
@@ -19,18 +26,18 @@ export function ChartToolbar({
         <span className="text-xs text-[#94a3b8] mr-2 font-medium">Timeframe</span>
         {TIMEFRAMES.map((tf) => (
           <button
-            key={tf}
-            onClick={() => onTimeframeChange(tf)}
+            key={tf.value}
+            onClick={() => onTimeframeChange(tf.value)}
             className={`
               px-2.5 py-1.5 rounded-md text-sm font-medium
               transition-all duration-200 ease-in-out
-              ${timeframe === tf
+              ${timeframe === tf.value
                 ? 'bg-[#3b82f6] text-white shadow-md'
                 : 'bg-[#0f172a] text-[#94a3b8] hover:bg-[#334155] hover:text-white'
               }
             `}
           >
-            {tf}
+            {tf.label}
           </button>
         ))}
       </div>

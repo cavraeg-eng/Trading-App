@@ -124,8 +124,31 @@ function Settings({ activePairs, onActivePairsChange }: SettingsProps) {
     }
   }
 
-  const handleSave = () => {
-    alert('Settings saved successfully!')
+  const [saveStatus, setSaveStatus] = useState<{type: 'success' | 'error', message: string} | null>(null)
+
+  const handleSave = async () => {
+    setSaveStatus(null)
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          maxPositionSize,
+          stopLoss,
+          takeProfit,
+          maxDailyLoss,
+          telegramToken,
+          discordWebhook,
+        })
+      })
+      if (res.ok) {
+        setSaveStatus({ type: 'success', message: 'Settings saved successfully' })
+      } else {
+        setSaveStatus({ type: 'error', message: 'Failed to save settings' })
+      }
+    } catch {
+      setSaveStatus({ type: 'error', message: 'Network error saving settings' })
+    }
   }
 
   const handleBrokerSelect = (brokerId: string) => {
@@ -744,6 +767,15 @@ function Settings({ activePairs, onActivePairsChange }: SettingsProps) {
           </div>
         </div>
       </div>
+
+      {/* Save Status */}
+      {saveStatus && (
+        <div className={`mt-4 px-4 py-2 rounded-lg text-sm ${
+          saveStatus.type === 'success' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+        }`}>
+          {saveStatus.message}
+        </div>
+      )}
 
       {/* Save Button */}
       <div className="mt-6 flex justify-end">

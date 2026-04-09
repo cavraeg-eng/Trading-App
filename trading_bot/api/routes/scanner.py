@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from trading_bot.api.models import ScanResult, ScannerConfig
 from trading_bot.api.routes.market import (
@@ -17,6 +17,28 @@ from trading_bot.config import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/scanner", tags=["scanner"])
+
+# Allowed comparison operators for scanner conditions
+ALLOWED_OPERATORS = {
+    "above", "below", "crosses_above", "crosses_below", "equals",
+    ">", "<", ">=", "<=", "==", "=", "between",
+}
+
+# Threshold validation ranges per indicator
+_THRESHOLD_RANGES = {
+    "RSI": (-100, 200),
+    "MACD": (-1000, 1000),
+    "MACD Signal": (-1000, 1000),
+    "MACD Histogram": (-1000, 1000),
+    "EMA": (0, 1_000_000),
+    "BB": (-5, 5),
+    "BB Upper": (0, 1_000_000),
+    "BB Lower": (0, 1_000_000),
+    "BB Middle": (0, 1_000_000),
+    "ATR": (0, 100_000),
+    "Volume": (0, 1000),
+    "Price": (0, 1_000_000),
+}
 
 DEFAULT_PAIRS = [
     "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD",
@@ -240,8 +262,9 @@ def evaluate_single_pair(symbol: str, conditions: list, logic: str) -> Optional[
 
             current_val = indicator_map.get(ind_name)
             if current_val is None:
-                # Indicator not supported — skip gracefully
-                logger.debug(f"Scanner: unknown indicator '{raw_name}' for {symbol}, skipping")
+                # Indicator not supported — include in result errors
+                logger.warning(f"Scanner: unsupported indicator '{raw_name}' for {symbol}, skipping")
+                matching_conditions.append(f"UNSUPPORTED: {raw_name}")
                 continue
 
             met = False
@@ -344,6 +367,30 @@ def scan_symbols(config: ScannerConfig) -> tuple:
 @router.post("/scan")
 async def run_scan(config: ScannerConfig):
     """Run a scan with the given configuration."""
+    # Validate conditions before scanning
+    errors = []
+    for i, cond in enumerate(config.conditions or []):
+        # Validate operator
+        if cond.operator not in ALLOWED_OPERATORS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid operator: '{cond.operator}'. Allowed: {sorted(ALLOWED_OPERATORS)}",
+            )
+        # Validate threshold ranges
+        resolved_name = _resolve_indicator_name(cond.indicator)
+        if resolved_name in _THRESHOLD_RANGES:
+            lo, hi = _THRESHOLD_RANGES[resolved_name]
+            if not (lo <= cond.value <= hi):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Threshold {cond.value} for '{cond.indicator}' out of valid range [{lo}, {hi}]",
+                )
+            if cond.value2 is not None and not (lo <= cond.value2 <= hi):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Threshold2 {cond.value2} for '{cond.indicator}' out of valid range [{lo}, {hi}]",
+                )
+
     results, total_scanned = scan_symbols(config)
     return {
         "results": results,

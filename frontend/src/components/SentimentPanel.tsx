@@ -6,7 +6,8 @@ interface SentimentPanelProps {
   symbol: string;
 }
 
-const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:8000';
+// Use relative URLs so the Vite proxy handles routing to the backend
+const API_URL = '';
 
 // Format time ago
 function formatTimeAgo(timestamp: string): string {

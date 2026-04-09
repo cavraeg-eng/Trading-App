@@ -1,13 +1,16 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, lazy, Suspense, useTransition } from 'react'
 import { LayoutDashboard, LineChart, Play, Settings, ScanLine, Users } from 'lucide-react'
-import Dashboard from './pages/Dashboard'
-import Backtest from './pages/Backtest'
-import LiveTrading from './pages/LiveTrading'
-import SettingsPage from './pages/Settings'
-import Scanner from './pages/Scanner'
-import Social from './pages/Social'
+import { api, type BackendStatus } from './lib/api'
 import { MAJOR_PAIRS, DEFAULT_PAIR, getPairBySymbol } from './config/forexPairs'
 import type { ForexPair } from './types'
+
+// Lazy-load page components for code splitting
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Backtest = lazy(() => import('./pages/Backtest'))
+const LiveTrading = lazy(() => import('./pages/LiveTrading'))
+const SettingsPage = lazy(() => import('./pages/Settings'))
+const Scanner = lazy(() => import('./pages/Scanner'))
+const Social = lazy(() => import('./pages/Social'))
 
 type Tab = 'dashboard' | 'scanner' | 'backtest' | 'live' | 'social' | 'settings'
 
@@ -17,6 +20,7 @@ const MAX_RECENT_PAIRS = 8
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard')
+  const [, startTransition] = useTransition()
   const [selectedPair, setSelectedPair] = useState<ForexPair>(() => {
     try {
       const stored = localStorage.getItem(DEFAULT_PAIR_KEY)
@@ -30,6 +34,15 @@ function App() {
     return DEFAULT_PAIR
   })
   const [activePairs, setActivePairs] = useState<ForexPair[]>(MAJOR_PAIRS)
+
+  // Backend health polling
+  const [backendStatus, setBackendStatus] = useState<BackendStatus | null>(null)
+  useEffect(() => {
+    const check = () => api.health().then(setBackendStatus)
+    check()
+    const id = setInterval(check, 15000)
+    return () => clearInterval(id)
+  }, [])
   
   // Load recent pairs from localStorage on init
   const [recentPairs, setRecentPairs] = useState<ForexPair[]>(() => {
@@ -107,7 +120,7 @@ function App() {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => startTransition(() => setActiveTab(tab.id))}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg mb-2 transition-colors ${
                   activeTab === tab.id
                     ? 'bg-trading-accent text-white'
@@ -123,7 +136,20 @@ function App() {
         
         <div className="p-4 border-t border-trading-border">
           <div className="text-xs text-trading-muted">
-            <p>Status: <span className="text-trading-buy">● Connected</span></p>
+            {backendStatus?.api.status === 'healthy' ? (
+              <p>API: <span className="text-trading-buy">● Connected</span></p>
+            ) : backendStatus?.api.status === 'unreachable' ? (
+              <p>API: <span className="text-red-400">● Disconnected</span></p>
+            ) : (
+              <p>API: <span className="text-yellow-400">● Checking...</span></p>
+            )}
+            {backendStatus?.broker ? (
+              <p className="mt-1">Broker: <span className={backendStatus.broker.connected ? 'text-trading-buy' : 'text-red-400'}>
+                {backendStatus.broker.connected ? '●' : '○'} {backendStatus.broker.name || 'None'}
+              </span></p>
+            ) : (
+              <p className="mt-1">Broker: <span className="text-trading-muted">Not configured</span></p>
+            )}
             <p className="mt-1">v1.0.0</p>
           </div>
         </div>
@@ -131,6 +157,7 @@ function App() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto">
+        <Suspense fallback={<div className="flex items-center justify-center h-full text-trading-muted">Loading...</div>}>
         {activeTab === 'dashboard' && (
           <Dashboard
             selectedPair={selectedPair}
@@ -167,6 +194,7 @@ function App() {
             onActivePairsChange={handleActivePairsChange}
           />
         )}
+        </Suspense>
       </main>
     </div>
   )
