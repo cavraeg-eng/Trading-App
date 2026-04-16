@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { TrendingUp, TrendingDown, Activity, Zap, Loader2 } from 'lucide-react'
-import type { AccountMetrics, ForexPair, AIRecommendation, ChartSignalMarker, SignalStatus, AIScoreData, DetectedPattern } from '../types'
+import type { AccountMetrics, ForexPair, AIRecommendation, ChartSignalMarker, SignalStatus, AIScoreData, DetectedPattern, CopyTradingSettings, CopyTradePosition, CopyTradeStats } from '../types'
 import { getPairBySymbol } from '../config/forexPairs'
 import { PairSelector } from '../components/PairSelector'
 import { ChartToolbar } from '../components/ChartToolbar'
@@ -10,10 +10,19 @@ import { PairHeatmap } from '../components/PairHeatmap'
 import { SentimentPanel } from '../components/SentimentPanel'
 import { SentimentHeatmap } from '../components/SentimentHeatmap'
 import { AITradingHub } from '../components/AITradingHub'
+import { SignalBreakdown } from '../components/SignalBreakdown'
+import { GoldContextPanel } from '../components/GoldContextPanel'
+import { OpportunityBoard } from '../components/OpportunityBoard'
+import { SpotProviderStatusCard } from '../components/SpotProviderStatusCard'
+import { StrategyCatalog } from '../components/StrategyCatalog'
+import { AutomationTemplateCard } from '../components/AutomationTemplateCard'
+import { AutomationCenterCard } from '../components/AutomationCenterCard'
 import WatchlistCard from '../components/WatchlistCard'
 import EconomicCalendar from '../components/EconomicCalendar'
 import { GoldScalperPro } from '../components/GoldScalperPro'
 import type { ScalpTradeData } from '../components/GoldScalperPro'
+import type { GoldContextData, SourceMetadata, DatasourceHealthResponse, OpportunityRow, StrategyDefinition, AutomationCenterState } from '../types'
+import api from '../lib/api'
 
 interface DashboardProps {
   selectedPair: ForexPair
@@ -22,6 +31,13 @@ interface DashboardProps {
   recentPairs?: ForexPair[]
   defaultPairSymbol?: string
   onSetDefaultPair?: (pair: ForexPair) => void
+  apiConnected?: boolean
+  backendBroker?: {
+    id: string | null
+    connected: boolean
+    name: string | null
+    environment?: string | null
+  } | null
 }
 
 type Signal = 'buy' | 'sell' | 'hold' | 'strong_buy' | 'strong_sell'
@@ -53,7 +69,32 @@ interface SignalDetails {
   patternAccuracy?: number | null
 }
 
-function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defaultPairSymbol, onSetDefaultPair }: DashboardProps) {
+interface ActiveSignalMeta {
+  signalId: string
+  direction: 'BUY' | 'SELL' | 'HOLD'
+  expiresAt?: string
+  confidence: number
+}
+
+interface ActiveBrokerInfo {
+  id: string
+  name: string
+  connected: boolean
+  type?: string
+  environment?: string
+}
+
+function Dashboard({
+  selectedPair,
+  onPairChange,
+  activePairs,
+  recentPairs,
+  defaultPairSymbol,
+  onSetDefaultPair,
+  apiConnected = false,
+  backendBroker = null,
+}: DashboardProps) {
+  const autoExecutionLockRef = useRef<string | null>(null)
   // Chart state
   const [timeframe, setTimeframe] = useState<string>('1h')
   const goldPair = useMemo(() => getPairBySymbol('XAU/USD') ?? selectedPair, [selectedPair])
@@ -75,7 +116,16 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
   const [multiTimeframe, setMultiTimeframe] = useState<MultiTimeframeData[]>([])
   const [lastSuccessfulFetch, setLastSuccessfulFetch] = useState<number>(Date.now())
   const [fetchError, setFetchError] = useState<string | null>(null)
-  const [quoteSource, setQuoteSource] = useState<'live' | 'mock' | 'unknown'>('unknown')
+  const [quoteSource, setQuoteSource] = useState<string>('unknown')
+  const [sourceMetadata, setSourceMetadata] = useState<SourceMetadata | null>(null)
+  const [goldContext, setGoldContext] = useState<GoldContextData | null>(null)
+  const [datasourceHealth, setDatasourceHealth] = useState<DatasourceHealthResponse | null>(null)
+  const [topOpportunities, setTopOpportunities] = useState<OpportunityRow[]>([])
+  const [xauOpportunities, setXAUOpportunities] = useState<OpportunityRow[]>([])
+  const [strategies, setStrategies] = useState<StrategyDefinition[]>([])
+  const [selectedStrategy, setSelectedStrategy] = useState<StrategyDefinition | null>(null)
+  const [automationCenter, setAutomationCenter] = useState<AutomationCenterState | null>(null)
+  const [activeBroker, setActiveBroker] = useState<ActiveBrokerInfo | null>(null)
 
   const effectiveAnalysisTimeframe = useMemo(() => {
     if (tradeStyle === 'scalp') {
@@ -87,9 +137,10 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
 
   const quoteTimeframe = useMemo(() => {
     if (tradeStyle === 'scalp') return timeframe === '5m' ? '5m' : '1m'
+    if (selectedPair.symbol === 'XAU/USD') return '15m'
     if (timeframe === '1m' || timeframe === '5m' || timeframe === '15m') return timeframe
     return '1m'
-  }, [timeframe, tradeStyle])
+  }, [selectedPair.symbol, timeframe, tradeStyle])
 
   const fetchIntervalMs = (() => {
     if (tradeStyle === 'scalp') return 5000
@@ -111,9 +162,17 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
 
   // Copy trading state
   const [copyTradingEnabled, setCopyTradingEnabled] = useState(false)
-  const [copiedPositions, setCopiedPositions] = useState<any[]>([])
-  const [copyStats, setCopyStats] = useState<any>(null)
+  const [copySettings, setCopySettings] = useState<CopyTradingSettings | null>(null)
+  const [copiedPositions, setCopiedPositions] = useState<CopyTradePosition[]>([])
+  const [copyHistory, setCopyHistory] = useState<CopyTradePosition[]>([])
+  const [copyStats, setCopyStats] = useState<CopyTradeStats | null>(null)
+  const [copyHistorySymbolFilter, setCopyHistorySymbolFilter] = useState<string>('all')
+  const [copyHistoryDirectionFilter, setCopyHistoryDirectionFilter] = useState<'ALL' | 'BUY' | 'SELL'>('ALL')
+  const [copyHistoryStatusFilter, setCopyHistoryStatusFilter] = useState<string>('all')
+  const [copyHistoryRangeFilter, setCopyHistoryRangeFilter] = useState<'all' | '7d' | '30d' | '90d'>('all')
   const [copyTradeLoading, setCopyTradeLoading] = useState(false)
+  const [copyRiskPct, setCopyRiskPct] = useState(1)
+  const [activeSignalMeta, setActiveSignalMeta] = useState<ActiveSignalMeta | null>(null)
 
   const [signalDetails, setSignalDetails] = useState<SignalDetails>({
     signal: 'hold',
@@ -146,17 +205,67 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
     totalTrades: 127,
   })
 
+  const refreshCopyData = useCallback(async () => {
+    try {
+      const symbolFilter = copyHistorySymbolFilter !== 'all' ? copyHistorySymbolFilter : undefined
+      const directionFilter = copyHistoryDirectionFilter !== 'ALL' ? copyHistoryDirectionFilter : undefined
+      const statusFilter = copyHistoryStatusFilter !== 'all' ? copyHistoryStatusFilter : undefined
+      const nowSeconds = Math.floor(Date.now() / 1000)
+      const fromTs = copyHistoryRangeFilter === '7d'
+        ? nowSeconds - 7 * 24 * 60 * 60
+        : copyHistoryRangeFilter === '30d'
+          ? nowSeconds - 30 * 24 * 60 * 60
+          : copyHistoryRangeFilter === '90d'
+            ? nowSeconds - 90 * 24 * 60 * 60
+            : undefined
+      const [posData, statsData, historyData] = await Promise.all([
+        api.fetchCopyPositions(),
+        api.fetchCopyStats(),
+        api.fetchCopyHistoryFiltered({
+          limit: 50,
+          symbol: symbolFilter,
+          status: statusFilter,
+          direction: directionFilter,
+          fromTs,
+        }),
+      ])
+      setCopiedPositions(posData.positions || [])
+      setCopyStats(statsData)
+      setCopyHistory(historyData.history || [])
+    } catch (err) {
+      console.error('Failed to fetch copy trading data:', err)
+    }
+  }, [copyHistoryDirectionFilter, copyHistoryRangeFilter, copyHistoryStatusFilter, copyHistorySymbolFilter])
+
+  const loadCopySettings = useCallback(async () => {
+    try {
+      const settings = await api.fetchCopyTradingSettings()
+      setCopySettings(settings)
+      setCopyTradingEnabled(settings.enabled)
+      if (!settings.enabled) {
+        setCopiedPositions([])
+        setCopyHistory([])
+        setCopyStats(null)
+      }
+    } catch (err) {
+      console.error('Failed to load copy trading settings:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadCopySettings()
+  }, [loadCopySettings])
+
   // Fast quote polling keeps hero price reactive even when full analysis is slower.
   useEffect(() => {
     const fetchQuote = async () => {
       try {
-        const res = await fetch(`/api/market/quote/${encodeURIComponent(selectedPair.symbol)}?timeframe=${quoteTimeframe}`)
-        if (!res.ok) return
-        const data = await res.json()
+        const data = await api.fetchQuote(selectedPair.symbol, quoteTimeframe, tradeStyle)
         setCurrentPrice(data.currentPrice)
         setPriceChange(data.priceChange)
         setPriceChangePercent(data.priceChangePercent)
-        setQuoteSource(data.source ?? 'unknown')
+        setQuoteSource(data.priceSource ?? data.source ?? 'unknown')
+        setSourceMetadata(data.sourceMetadata ?? null)
         setLastSuccessfulFetch(Date.now())
         setFetchError(null)
       } catch {
@@ -167,7 +276,50 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
     fetchQuote()
     const interval = setInterval(fetchQuote, fetchIntervalMs)
     return () => clearInterval(interval)
-  }, [selectedPair, quoteTimeframe, fetchIntervalMs])
+  }, [selectedPair, quoteTimeframe, fetchIntervalMs, tradeStyle])
+
+  useEffect(() => {
+    if (selectedPair.symbol !== 'XAU/USD') {
+      setGoldContext(null)
+      return
+    }
+    api.fetchGoldContext().then(setGoldContext).catch(() => setGoldContext(null))
+  }, [selectedPair.symbol, tradeStyle])
+
+  useEffect(() => {
+    api.fetchTopOpportunities(effectiveAnalysisTimeframe, tradeStyle)
+      .then((data) => setTopOpportunities(data.results || []))
+      .catch(() => setTopOpportunities([]))
+  }, [effectiveAnalysisTimeframe, tradeStyle])
+
+  useEffect(() => {
+    api.fetchStrategies().then((data) => setStrategies(data.results || [])).catch(() => setStrategies([]))
+  }, [])
+
+  useEffect(() => {
+    api.fetchAutomationCenter().then(setAutomationCenter).catch(() => setAutomationCenter(null))
+  }, [strategies])
+
+  useEffect(() => {
+    if (selectedPair.symbol !== 'XAU/USD') {
+      setXAUOpportunities([])
+      return
+    }
+    api.fetchXAUOpportunities()
+      .then((data) => setXAUOpportunities(data.results || []))
+      .catch(() => setXAUOpportunities([]))
+  }, [selectedPair.symbol, tradeStyle])
+
+  useEffect(() => {
+    if (selectedPair.symbol !== 'XAU/USD') {
+      setDatasourceHealth(null)
+      return
+    }
+    const load = () => api.fetchDatasourceHealth().then(setDatasourceHealth).catch(() => setDatasourceHealth(null))
+    load()
+    const interval = setInterval(load, 15000)
+    return () => clearInterval(interval)
+  }, [selectedPair.symbol, tradeStyle])
 
   useEffect(() => {
     if (tradeStyle === 'scalp' && timeframe !== '1m' && timeframe !== '5m') {
@@ -182,12 +334,13 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
       try {
         const [analysisRes, signalRes] = await Promise.allSettled([
           fetch(`/api/market/analysis/${encodeURIComponent(selectedPair.symbol)}?timeframe=${effectiveAnalysisTimeframe}&trade_style=${tradeStyle}`),
-          fetch(`/api/signals/breakdown/${encodeURIComponent(selectedPair.symbol)}?timeframe=${effectiveAnalysisTimeframe || '1h'}`)
+          fetch(`/api/signals/breakdown/${encodeURIComponent(selectedPair.symbol)}?timeframe=${effectiveAnalysisTimeframe || '1h'}&trade_style=${tradeStyle}`)
         ])
 
         // Process analysis result
         if (analysisRes.status === 'fulfilled' && analysisRes.value.ok) {
           const data = await analysisRes.value.json()
+          setSourceMetadata(data.sourceMetadata ?? null)
           setSignalDetails({
             signal: data.signal,
             confidence: data.confidence,
@@ -221,6 +374,7 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
             takeProfit1: data.take_profit1,
             takeProfit2: data.take_profit2,
             takeProfit3: data.take_profit3,
+            signalId: data.signal_id,
             direction: data.direction,
             timestamp: data.timestamp,
             status: data.signal_status || 'VALID',
@@ -230,6 +384,16 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
           }
           setChartSignals([marker])
           setSignalStatus(data.signal_status || 'VALID')
+          setActiveSignalMeta({
+            signalId: data.signal_id,
+            direction: data.direction,
+            expiresAt: data.expires_at,
+            confidence: data.confidence,
+          })
+        } else {
+          setChartSignals([])
+          setSignalStatus(null)
+          setActiveSignalMeta(null)
         }
 
         setLastSuccessfulFetch(Date.now())
@@ -247,33 +411,71 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
     return () => clearInterval(interval)
   }, [selectedPair, effectiveAnalysisTimeframe, tradeStyle, fetchIntervalMs])
 
+  useEffect(() => {
+    let isMounted = true
+
+    const refreshActiveBroker = async () => {
+      try {
+        const broker = await api.get<ActiveBrokerInfo | null>('/api/broker/active')
+        if (isMounted) {
+          setActiveBroker(broker)
+        }
+      } catch {
+        if (isMounted) {
+          setActiveBroker(null)
+        }
+      }
+    }
+
+    void refreshActiveBroker()
+    const interval = setInterval(() => {
+      void refreshActiveBroker()
+    }, 10000)
+
+    return () => {
+      isMounted = false
+      clearInterval(interval)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!backendBroker?.id) return
+    setActiveBroker({
+      id: backendBroker.id,
+      name: backendBroker.name || backendBroker.id,
+      connected: backendBroker.connected,
+      environment: backendBroker.environment || undefined,
+    })
+  }, [backendBroker?.connected, backendBroker?.environment, backendBroker?.id, backendBroker?.name])
+
   // Fetch copy trading data when enabled
   useEffect(() => {
     if (!copyTradingEnabled) return
 
-    const fetchCopyData = async () => {
-      try {
-        const [posRes, statsRes] = await Promise.all([
-          fetch('/api/copy-trading/positions'),
-          fetch('/api/copy-trading/stats'),
-        ])
-        if (posRes.ok) {
-          const posData = await posRes.json()
-          setCopiedPositions(posData.positions || [])
-        }
-        if (statsRes.ok) {
-          const statsData = await statsRes.json()
-          setCopyStats(statsData)
-        }
-      } catch (err) {
-        console.error('Failed to fetch copy trading data:', err)
-      }
-    }
-
-    fetchCopyData()
-    const interval = setInterval(fetchCopyData, 10000)
+    refreshCopyData()
+    const interval = setInterval(refreshCopyData, 10000)
     return () => clearInterval(interval)
-  }, [copyTradingEnabled])
+  }, [copyTradingEnabled, refreshCopyData])
+
+  const copyDisabledReason = useMemo(() => {
+    if (!copyTradingEnabled) return 'Enable copy trading to copy this signal'
+    if (copyTradeLoading) return 'Copy request already in progress'
+    if (!copySettings) return 'Loading copy trading settings'
+    if (!activeSignalMeta?.signalId) return 'Signal unavailable'
+    if (activeSignalMeta.direction === 'HOLD' || signalDetails.signal === 'hold') return 'Hold signals cannot be copied'
+    if (signalStatus === 'EXPIRED') return 'Signal expired — wait for a fresh setup'
+    if (!copySettings.allowed_symbols.includes(selectedPair.symbol)) return `${selectedPair.symbol} is not enabled for copy trading`
+    if (activeSignalMeta.confidence < copySettings.min_confidence) {
+      return `Signal confidence is below the ${copySettings.min_confidence}% minimum`
+    }
+    if (sourceMetadata?.qualityFlags?.includes('mock_data') || sourceMetadata?.qualityFlags?.includes('stale_data')) {
+      return 'Wait for fresh market data before copying this signal'
+    }
+    if (copiedPositions.some((position) => position.signal_id === activeSignalMeta.signalId && ['open', 'partial_tp1', 'partial_tp2'].includes(position.status))) {
+      return 'This signal is already copied'
+    }
+    return null
+  }, [activeSignalMeta, copiedPositions, copySettings, copyTradeLoading, copyTradingEnabled, selectedPair.symbol, signalDetails.signal, signalStatus, sourceMetadata])
 
   const handleAISuggest = useCallback(async () => {
     const recs = await fetchRecommendations(activePairs)
@@ -290,44 +492,78 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
     setIsTrading(true)
     setTradeStatus(null)
 
-    // Calculate position size (same logic as TradeExecutionPanel)
-    const riskPct = 2 // default risk %
+    const template = automationCenter?.template
+    const riskPct = template?.allocationPercent ?? 2
     const riskAmount = metrics.balance * (riskPct / 100)
     const entryMid = (signalDetails.entryRange.min + signalDetails.entryRange.max) / 2
     const stopDistance = Math.abs(entryMid - signalDetails.stopLoss)
     const pipSz = selectedPair.basePriceApprox < 10 ? 0.0001 : selectedPair.basePriceApprox < 200 ? 0.01 : selectedPair.basePriceApprox < 5000 ? 0.10 : 1.0
     const stopPips = stopDistance / pipSz
     const pipValue = selectedPair.basePriceApprox < 10 ? 10 : 1
-    const quantity = stopPips > 0 ? riskAmount / (stopPips * pipValue) : 0.01
+    const calculatedQuantity = stopPips > 0 ? riskAmount / (stopPips * pipValue) : 1
+    const paperQuantity = Math.max(0.01, Math.round(calculatedQuantity * 100) / 100)
+    const brokerForExecution = activeBroker || (backendBroker?.id ? {
+      id: backendBroker.id,
+      name: backendBroker.name || backendBroker.id,
+      connected: backendBroker.connected,
+      environment: backendBroker.environment || undefined,
+    } : null)
+    const isForexPair = ['major', 'minor', 'exotic'].includes(selectedPair.category)
+    const hasExecutionLevels =
+      signalDetails.entryRange.min > 0 &&
+      signalDetails.entryRange.max > 0 &&
+      signalDetails.entryRange.min !== signalDetails.entryRange.max &&
+      signalDetails.stopLoss > 0
+    const liveQuantity = !hasExecutionLevels
+      ? 1
+      : brokerForExecution?.id === 'oanda' && isForexPair
+        ? Math.max(1, Math.round(calculatedQuantity * 100000))
+        : Math.max(1, Math.round(calculatedQuantity))
 
     try {
-      const res = await fetch('/api/trading/paper-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      if (brokerForExecution?.connected) {
+        const data = await api.placeBrokerOrder({
+          broker_id: brokerForExecution.id,
           symbol: selectedPair.symbol,
           side,
-          quantity: Math.round(quantity * 100) / 100,
+          quantity: liveQuantity,
           order_type: 'market',
-          price: currentPrice,
-          stop_loss: signalDetails.stopLoss,
-          take_profit_1: signalDetails.takeProfit1,
-          take_profit_2: signalDetails.takeProfit2,
-          take_profit_3: signalDetails.takeProfit3,
-          risk_percent: riskPct,
-          trade_style: tradeStyle,
-          confidence: signalDetails.confidence,
+          price: null,
         })
-      })
-
-      const data = await res.json()
-      if (res.ok && data.success) {
-        setTradeStatus({ type: 'success', message: data.message })
+        setTradeStatus({
+          type: 'success',
+          message: `${data.message}${selectedStrategy ? ` · strategy ${selectedStrategy.name}` : ''}`,
+        })
       } else {
-        setTradeStatus({ type: 'error', message: data.detail || 'Order failed' })
+        const res = await fetch('/api/trading/paper-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbol: selectedPair.symbol,
+            side,
+            quantity: paperQuantity,
+            order_type: 'market',
+            price: currentPrice,
+            stop_loss: signalDetails.stopLoss,
+            take_profit_1: signalDetails.takeProfit1,
+            take_profit_2: signalDetails.takeProfit2,
+            take_profit_3: signalDetails.takeProfit3,
+            risk_percent: riskPct,
+            trade_style: tradeStyle,
+            strategy_id: selectedStrategy?.id,
+            confidence: signalDetails.confidence,
+          })
+        })
+
+        const data = await res.json()
+        if (res.ok && data.success) {
+          setTradeStatus({ type: 'success', message: `${data.message}${selectedStrategy ? ` · strategy ${selectedStrategy.name}` : ''}` })
+        } else {
+          setTradeStatus({ type: 'error', message: data.detail || 'Order failed' })
+        }
       }
-    } catch (err) {
-      setTradeStatus({ type: 'error', message: 'Network error placing order' })
+    } catch (err: any) {
+      setTradeStatus({ type: 'error', message: err?.detail || 'Network error placing order' })
     } finally {
       setIsTrading(false)
       // Auto-dismiss after 5 seconds
@@ -346,19 +582,35 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled }),
       })
+      const data = await res.json()
       if (res.ok) {
-        setCopyTradingEnabled(enabled)
-        if (!enabled) {
+        setCopySettings(data)
+        setCopyTradingEnabled(Boolean(data.enabled))
+        if (!data.enabled) {
           setCopiedPositions([])
+          setCopyHistory([])
           setCopyStats(null)
         }
+      } else {
+        setTradeStatus({ type: 'error', message: data.detail || 'Failed to update copy trading settings' })
       }
     } catch (err) {
       console.error('Failed to update copy trading settings:', err)
+      setTradeStatus({ type: 'error', message: 'Failed to update copy trading settings' })
     }
   }, [])
 
   const handleCopySignal = useCallback(async () => {
+    if (copyDisabledReason) {
+      setTradeStatus({ type: 'error', message: copyDisabledReason })
+      setTimeout(() => setTradeStatus(null), 5000)
+      return
+    }
+    if (!activeSignalMeta?.signalId) {
+      setTradeStatus({ type: 'error', message: 'Signal unavailable' })
+      setTimeout(() => setTradeStatus(null), 5000)
+      return
+    }
     setCopyTradeLoading(true)
     try {
       const entryMid = (signalDetails.entryRange.min + signalDetails.entryRange.max) / 2
@@ -366,35 +618,34 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
       const stopDist = Math.abs(entryMid - signalDetails.stopLoss)
       const stopPips = stopDist / pipSz
       const pipValue = selectedPair.basePriceApprox < 10 ? 10 : 1
-      const riskAmount = metrics.balance * 0.01
+      const riskAmount = metrics.balance * (copyRiskPct / 100)
       const quantity = stopPips > 0 ? riskAmount / (stopPips * pipValue) : 0.01
+      const requestedQuantity = Math.round(quantity * 100) / 100
 
       const res = await fetch('/api/copy-trading/copy-signal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          symbol: selectedPair.symbol,
-          direction: signalDetails.signal.includes('buy') ? 'BUY' : 'SELL',
-          quantity: Math.round(quantity * 100) / 100,
+          signal_id: activeSignalMeta.signalId,
+          quantity: requestedQuantity,
           entry_price: currentPriceRef.current,
-          stop_loss: signalDetails.stopLoss,
-          take_profit1: signalDetails.takeProfit1,
-          take_profit2: signalDetails.takeProfit2,
-          take_profit3: signalDetails.takeProfit3,
-          confidence: signalDetails.confidence,
-          risk_percent: 1.0,
-          trade_style: tradeStyle,
-          timeframe: timeframe,
+          risk_percent: copyRiskPct,
         }),
       })
       const data = await res.json()
-      if (data.success) {
-        setTradeStatus({ type: 'success', message: data.message })
-        const posRes = await fetch('/api/copy-trading/positions')
-        if (posRes.ok) {
-          const posData = await posRes.json()
-          setCopiedPositions(posData.positions || [])
+      if (res.ok && data.success) {
+        const adjustments: string[] = []
+        if (typeof data.effective_risk_percent === 'number' && Math.abs(data.effective_risk_percent - copyRiskPct) > 0.001) {
+          adjustments.push(`risk capped to ${data.effective_risk_percent}%`)
         }
+        if (typeof data.effective_quantity === 'number' && Math.abs(data.effective_quantity - requestedQuantity) > 0.001) {
+          adjustments.push(`size capped to ${Number(data.effective_quantity).toFixed(2)} lots`)
+        }
+        setTradeStatus({
+          type: 'success',
+          message: adjustments.length > 0 ? `${data.message} · ${adjustments.join(' · ')}` : data.message,
+        })
+        await refreshCopyData()
       } else {
         setTradeStatus({ type: 'error', message: data.detail || 'Copy trade failed' })
       }
@@ -404,21 +655,23 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
       setCopyTradeLoading(false)
       setTimeout(() => setTradeStatus(null), 5000)
     }
-  }, [selectedPair, signalDetails, currentPrice, tradeStyle, timeframe, metrics.balance])
+  }, [activeSignalMeta, copyDisabledReason, copyRiskPct, metrics.balance, refreshCopyData, selectedPair.basePriceApprox, signalDetails.entryRange.max, signalDetails.entryRange.min, signalDetails.stopLoss])
 
   const handleCloseCopyTrade = useCallback(async (copyTradeId: string) => {
     try {
       const res = await fetch(`/api/copy-trading/close/${copyTradeId}`, { method: 'POST' })
       const data = await res.json()
-      if (data.success) {
+      if (res.ok && data.success) {
         setTradeStatus({ type: 'success', message: `Closed copy trade: ${data.realized_pnl >= 0 ? '+' : ''}$${data.realized_pnl.toFixed(2)}` })
-        setCopiedPositions(prev => prev.filter(p => p.copy_trade_id !== copyTradeId))
+        await refreshCopyData()
+      } else {
+        setTradeStatus({ type: 'error', message: data.detail || 'Failed to close copy trade' })
       }
     } catch (err) {
       setTradeStatus({ type: 'error', message: 'Failed to close copy trade' })
     }
     setTimeout(() => setTradeStatus(null), 5000)
-  }, [])
+  }, [refreshCopyData])
 
   const handleScalpTrade = useCallback(async (side: 'buy' | 'sell', data: ScalpTradeData) => {
     setTradeStatus(null)
@@ -437,6 +690,7 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
           take_profit_2: data.takeProfit2,
           risk_percent: data.riskPercent,
           trade_style: 'scalp',
+          strategy_id: selectedStrategy?.id,
           confidence: data.confidence,
           timeframe: data.timeframe,
         })
@@ -451,7 +705,73 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
       setTradeStatus({ type: 'error', message: 'Network error placing scalp order' })
     }
     setTimeout(() => setTradeStatus(null), 5000)
-  }, [])
+  }, [selectedStrategy])
+
+  useEffect(() => {
+    const template = automationCenter?.template
+    const activeStrategy = automationCenter?.activeStrategy
+    if (!template?.enabled || automationCenter?.activeMode !== 'paper' || !activeStrategy) return
+    if (activeStrategy.symbol !== selectedPair.symbol) return
+    if (signalDetails.signal === 'hold') return
+    if (signalDetails.confidence < 70) return
+    if (sourceMetadata?.qualityFlags?.includes('stale_data')) return
+
+    const side = signalDetails.signal.includes('buy') ? 'buy' : signalDetails.signal.includes('sell') ? 'sell' : null
+    if (!side) return
+
+    const signalKey = [
+      activeStrategy.id,
+      selectedPair.symbol,
+      tradeStyle,
+      signalDetails.signal,
+      Math.round(currentPriceRef.current * 100) / 100,
+    ].join(':')
+
+    if (autoExecutionLockRef.current === signalKey) return
+    autoExecutionLockRef.current = signalKey
+
+    const timer = setTimeout(async () => {
+      try {
+        const riskPct = template.allocationPercent ?? 2
+        const riskAmount = metrics.balance * (riskPct / 100)
+        const entryMid = (signalDetails.entryRange.min + signalDetails.entryRange.max) / 2
+        const stopDistance = Math.abs(entryMid - signalDetails.stopLoss)
+        const pipSz = selectedPair.basePriceApprox < 10 ? 0.0001 : selectedPair.basePriceApprox < 200 ? 0.01 : selectedPair.basePriceApprox < 5000 ? 0.10 : 1.0
+        const stopPips = stopDistance / pipSz
+        const pipValue = selectedPair.basePriceApprox < 10 ? 10 : 1
+        const quantity = stopPips > 0 ? riskAmount / (stopPips * pipValue) : 0.01
+
+        const res = await fetch('/api/trading/paper-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbol: selectedPair.symbol,
+            side,
+            quantity: Math.round(quantity * 100) / 100,
+            order_type: 'market',
+            price: currentPriceRef.current,
+            stop_loss: signalDetails.stopLoss,
+            take_profit_1: signalDetails.takeProfit1,
+            take_profit_2: signalDetails.takeProfit2,
+            take_profit_3: signalDetails.takeProfit3,
+            risk_percent: riskPct,
+            trade_style: tradeStyle,
+            strategy_id: activeStrategy.id,
+            confidence: signalDetails.confidence,
+          }),
+        })
+        const data = await res.json()
+        if (res.ok && data.success) {
+          setTradeStatus({ type: 'success', message: `Auto paper ${side.toUpperCase()} executed via ${activeStrategy.name}` })
+        }
+      } catch {
+        setTradeStatus({ type: 'error', message: 'Auto paper execution failed' })
+      }
+      setTimeout(() => setTradeStatus(null), 5000)
+    }, 800)
+
+    return () => clearTimeout(timer)
+  }, [automationCenter, metrics.balance, selectedPair, signalDetails, sourceMetadata, tradeStyle])
 
   const handleActivateGoldMode = useCallback((nextTimeframe: '1m' | '5m') => {
     if (goldPair.symbol === 'XAU/USD' && selectedPair.symbol !== 'XAU/USD') {
@@ -460,6 +780,20 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
     setTradeStyle('scalp')
     setTimeframe(nextTimeframe)
   }, [goldPair, onPairChange, selectedPair.symbol])
+
+  const canRenderTradeControls = useMemo(() => {
+    return (
+      signalDetails.entryRange.min > 0 &&
+      signalDetails.entryRange.max > 0 &&
+      signalDetails.entryRange.min !== signalDetails.entryRange.max &&
+      signalDetails.stopLoss > 0
+    )
+  }, [
+    signalDetails.entryRange.max,
+    signalDetails.entryRange.min,
+    signalDetails.stopLoss,
+  ])
+  const liveExecutionReady = Boolean(apiConnected && (activeBroker?.connected || backendBroker?.connected))
 
   const getRegimeIcon = (regime: MarketRegime) => {
     switch (regime) {
@@ -574,6 +908,7 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
           )}
 
           {/* Unified Trading Signal Card - Full Width */}
+          {selectedPair.symbol === 'XAU/USD' && <GoldContextPanel context={goldContext} />}
           <AITradingHub
             signalDetails={signalDetails}
             currentPrice={currentPrice}
@@ -581,24 +916,50 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
             priceChangePercent={priceChangePercent}
             selectedPair={selectedPair}
             accountBalance={metrics.balance}
-            isLoading={isLoading}
+            isLoading={isLoading && !canRenderTradeControls}
             onBuy={handleBuy}
             onSell={handleSell}
             tradeStyle={tradeStyle}
             onTradeStyleChange={setTradeStyle}
             signalStatus={signalStatus ?? undefined}
             multiTimeframe={multiTimeframe}
+            forceShowTradeControls={liveExecutionReady}
             copyTradingEnabled={copyTradingEnabled}
             onToggleCopyTrading={handleToggleCopyTrading}
             copiedPositions={copiedPositions}
+            copyHistory={copyHistory}
             copyStats={copyStats}
+            copyHistorySymbolFilter={copyHistorySymbolFilter}
+            onCopyHistorySymbolFilterChange={setCopyHistorySymbolFilter}
+            copyHistoryDirectionFilter={copyHistoryDirectionFilter}
+            onCopyHistoryDirectionFilterChange={setCopyHistoryDirectionFilter}
+            copyHistoryStatusFilter={copyHistoryStatusFilter}
+            onCopyHistoryStatusFilterChange={setCopyHistoryStatusFilter}
+            copyHistoryRangeFilter={copyHistoryRangeFilter}
+            onCopyHistoryRangeFilterChange={setCopyHistoryRangeFilter}
             onCopySignal={handleCopySignal}
             onCloseCopyTrade={handleCloseCopyTrade}
             copyTradeLoading={copyTradeLoading}
+            riskPct={copyRiskPct}
+            onRiskPctChange={setCopyRiskPct}
+            copyDisabledReason={copyDisabledReason}
             dataFreshness={dataFreshness}
             lastUpdatedMs={lastSuccessfulFetch}
             quoteSource={quoteSource}
             activeTimeframe={quoteTimeframe}
+            sourceMetadata={sourceMetadata}
+          />
+
+          <SignalBreakdown
+            symbol={selectedPair.symbol}
+            pair={selectedPair}
+            signalData={{
+              signal: signalDetails.signal,
+              confidence: signalDetails.confidence,
+              indicators: signalDetails.indicators,
+            }}
+            signalStatus={signalStatus ?? undefined}
+            sourceMetadata={sourceMetadata}
           />
 
 
@@ -622,6 +983,49 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
             onSelectPair={handleSelectPairFromAI}
             isVisible={showAIRecommendations}
           />
+
+          <StrategyCatalog
+            strategies={strategies}
+            onSelectStrategy={setSelectedStrategy}
+            onActivate={async (strategy, mode) => {
+              await api.activateStrategy(strategy.id, mode, true)
+              const data = await api.fetchStrategies()
+              setStrategies(data.results || [])
+              setSelectedStrategy(strategy)
+              setTradeStatus({ type: 'success', message: `Activated ${strategy.name} in ${mode} mode` })
+              const center = await api.fetchAutomationCenter()
+              setAutomationCenter(center)
+            }}
+          />
+          <AutomationTemplateCard
+            strategy={selectedStrategy}
+            onSaved={async () => {
+              setTradeStatus({ type: 'success', message: `Saved automation template for ${selectedStrategy?.name}` })
+              const center = await api.fetchAutomationCenter()
+              setAutomationCenter(center)
+            }}
+          />
+          <AutomationCenterCard automationCenter={automationCenter} />
+
+          <OpportunityBoard
+            title="Top Opportunities"
+            rows={topOpportunities}
+            onSelectSymbol={(symbol) => {
+              const pair = getPairBySymbol(symbol)
+              if (pair) onPairChange(pair)
+            }}
+          />
+
+          {selectedPair.symbol === 'XAU/USD' && (
+            <OpportunityBoard
+              title="XAU Setups"
+              rows={xauOpportunities}
+              onSelectSymbol={(symbol) => {
+                const pair = getPairBySymbol(symbol)
+                if (pair) onPairChange(pair)
+              }}
+            />
+          )}
 
           {/* Pair Heatmap */}
           <PairHeatmap
@@ -658,6 +1062,10 @@ function Dashboard({ selectedPair, onPairChange, activePairs, recentPairs, defau
               </div>
             </div>
           </div>
+
+          {selectedPair.symbol === 'XAU/USD' && (
+            <SpotProviderStatusCard health={datasourceHealth} />
+          )}
 
         </div>
       </div>

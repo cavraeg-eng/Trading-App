@@ -11,7 +11,10 @@ import {
   BarChart3,
   Activity
 } from 'lucide-react'
-import type { SignalBreakdownData, IndicatorContribution, ForexPair, SignalStatus } from '../types'
+import type { SignalBreakdownData, IndicatorContribution, ForexPair, SignalStatus, SourceMetadata } from '../types'
+import { DataSourceBadge } from './DataSourceBadge'
+import { FreshnessPill } from './FreshnessPill'
+import { DataQualityBanner } from './DataQualityBanner'
 
 interface SignalBreakdownProps {
   symbol: string;
@@ -22,6 +25,7 @@ interface SignalBreakdownProps {
     indicators: { name: string; value: string; signal: 'bullish' | 'bearish' | 'neutral' }[];
   };
   signalStatus?: SignalStatus;
+  sourceMetadata?: SourceMetadata | null;
 }
 
 // Generate realistic mock data when API is unavailable
@@ -198,7 +202,7 @@ function computeStatusFromTimestamp(timestamp: string): SignalStatus {
   return 'EXPIRED';
 }
 
-export function SignalBreakdown({ symbol, signalData, signalStatus }: SignalBreakdownProps) {
+export function SignalBreakdown({ symbol, signalData, signalStatus, sourceMetadata }: SignalBreakdownProps) {
   const [data, setData] = useState<SignalBreakdownData | null>(null)
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState(false)
@@ -249,6 +253,7 @@ export function SignalBreakdown({ symbol, signalData, signalStatus }: SignalBrea
       }
       
       const apiData = await response.json()
+      const responseMetadata = apiData.source_metadata ?? null
       
       // Transform API data to match our interface (snake_case → camelCase + type normalization)
       const fallbackExplanation = generateMockBreakdown(symbol).explanation
@@ -266,6 +271,9 @@ export function SignalBreakdown({ symbol, signalData, signalStatus }: SignalBrea
         timestamp: apiData.timestamp,
       }
       setData(normalized)
+      if (responseMetadata) {
+        // no-op: metadata is rendered from prop when parent passes it
+      }
     } catch (err) {
       // Fallback to mock data
       console.log('Using mock data for signal breakdown')
@@ -296,8 +304,23 @@ export function SignalBreakdown({ symbol, signalData, signalStatus }: SignalBrea
   }
   
   if (!data) {
-    return (
-      <div className="bg-trading-card border border-trading-border rounded-lg p-4">
+  return (
+    <div className="bg-trading-card border border-trading-border rounded-lg p-4">
+      {sourceMetadata && (
+        <>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <DataSourceBadge
+              sourceType={sourceMetadata.sourceType}
+              sourceName={sourceMetadata.sourceName}
+              contextLabel={sourceMetadata.tradeStyle === 'scalp' ? 'Scalp Mode' : sourceMetadata.symbol === 'XAU/USD' ? 'Swing Mode' : undefined}
+            />
+            <FreshnessPill freshnessSeconds={sourceMetadata.freshnessSeconds} marketStatus={sourceMetadata.marketStatus} />
+          </div>
+          <div className="mb-3">
+            <DataQualityBanner qualityFlags={sourceMetadata.qualityFlags} />
+          </div>
+        </>
+      )}
         <p className="text-trading-muted text-sm">Unable to load signal data</p>
       </div>
     )

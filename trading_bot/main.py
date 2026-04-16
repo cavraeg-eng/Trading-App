@@ -106,8 +106,22 @@ def fetch_data(
 def train(
     data_path: Path = typer.Option("./data", "--data", "-d", help="Path to training data"),
     model_type: str = typer.Option("PPO", "--model", "-m", help="Model type (PPO/SAC)"),
+    architecture: str = typer.Option(
+        "lstm",
+        "--architecture",
+        help="Feature extractor architecture (mlp/lstm/transformer)",
+    ),
     timesteps: int = typer.Option(100000, "--timesteps", "-t", help="Training timesteps"),
     optimize: bool = typer.Option(True, "--optimize/--no-optimize", help="Optimize hyperparameters"),
+    walk_forward: bool = typer.Option(False, "--walk-forward", help="Run walk-forward validation"),
+    train_days: int = typer.Option(180, "--train-days", help="Walk-forward train window"),
+    test_days: int = typer.Option(30, "--test-days", help="Walk-forward test window"),
+    timesteps_per_fold: int = typer.Option(
+        50000,
+        "--timesteps-per-fold",
+        help="Training timesteps per walk-forward fold",
+    ),
+    window_size: int = typer.Option(50, "--window-size", help="Observation window size"),
 ):
     """Train RL model."""
     settings = get_settings()
@@ -115,6 +129,7 @@ def train(
     console.print(Panel.fit(
         f"[bold]Training Configuration[/bold]\n"
         f"Model: {model_type}\n"
+        f"Architecture: {architecture}\n"
         f"Timesteps: {timesteps:,}\n"
         f"Optimize: {optimize}",
         title="Training",
@@ -141,12 +156,27 @@ def train(
     trainer = ModelTrainer(
         model_path=settings.model_path,
         n_trials=20 if optimize else 0,
+        window_size=window_size,
+        architecture=architecture,
     )
     
     model_type_enum = ModelType.PPO if model_type.upper() == "PPO" else ModelType.SAC
     
     with console.status("[bold green]Training model..."):
-        agent = trainer.train(
+        if walk_forward:
+            results = trainer.walk_forward_validation(
+                df=df,
+                model_type=model_type_enum,
+                train_days=train_days,
+                test_days=test_days,
+                timesteps_per_fold=timesteps_per_fold,
+            )
+            console.print(
+                f"[bold green]✓ Walk-forward completed across {len(results)} folds![/bold green]"
+            )
+            return
+
+        trainer.train(
             df=df,
             model_type=model_type_enum,
             total_timesteps=timesteps,

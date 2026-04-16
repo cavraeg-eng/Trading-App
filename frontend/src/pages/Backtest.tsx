@@ -1,7 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Play, Download, Calendar, Settings } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import type { BacktestResult, ForexPair } from '../types'
+import api from '../lib/api'
+import { formatDateOnly } from '../lib/time'
+import { StrategyCatalog } from '../components/StrategyCatalog'
+import { AutomationTemplateCard } from '../components/AutomationTemplateCard'
+import type { StrategyDefinition } from '../types'
 
 interface BacktestProps {
   selectedPair: ForexPair
@@ -14,11 +19,19 @@ function Backtest({ selectedPair, activePairs, onPairChange, recentPairs: _recen
   const [startDate, setStartDate] = useState('2024-01-01')
   const [endDate, setEndDate] = useState('2024-12-31')
   const [timeframe, setTimeframe] = useState('1h')
+  const [tradeStyle, setTradeStyle] = useState<'scalp' | 'swing'>('swing')
   const [model, setModel] = useState('ppo')
   const [initialBalance, setInitialBalance] = useState(10000)
   const [isRunning, setIsRunning] = useState(false)
   const [result, setResult] = useState<BacktestResult | null>(null)
+  const [report, setReport] = useState<any | null>(null)
+  const [strategies, setStrategies] = useState<StrategyDefinition[]>([])
+  const [selectedStrategy, setSelectedStrategy] = useState<StrategyDefinition | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    api.fetchStrategies().then((data) => setStrategies(data.results || [])).catch(() => setStrategies([]))
+  }, [])
 
   const isDateValid = startDate && endDate && new Date(endDate) > new Date(startDate)
 
@@ -35,6 +48,8 @@ function Backtest({ selectedPair, activePairs, onPairChange, recentPairs: _recen
           start_date: startDate,
           end_date: endDate,
           timeframe,
+          trade_style: tradeStyle,
+          strategy_id: selectedStrategy?.id,
           initial_balance: initialBalance,
         })
       })
@@ -44,6 +59,12 @@ function Backtest({ selectedPair, activePairs, onPairChange, recentPairs: _recen
           setError(data.error)
         } else {
           setResult(data)
+          try {
+            const reportData = await api.fetchBacktestReport(selectedPair.symbol, timeframe, tradeStyle, startDate, endDate)
+            setReport(reportData)
+          } catch {
+            setReport(null)
+          }
         }
       } else {
         const errorData = await res.json().catch(() => null)
@@ -135,6 +156,18 @@ function Backtest({ selectedPair, activePairs, onPairChange, recentPairs: _recen
               </div>
 
               <div>
+                <label className="block text-sm text-trading-muted mb-2">Trade Style</label>
+                <select
+                  value={tradeStyle}
+                  onChange={(e) => setTradeStyle(e.target.value as 'scalp' | 'swing')}
+                  className="input-field w-full"
+                >
+                  <option value="swing">Swing</option>
+                  <option value="scalp">Scalp</option>
+                </select>
+              </div>
+
+              <div>
                 <label className="block text-sm text-trading-muted mb-2">Model</label>
                 <select
                   value={model}
@@ -174,6 +207,22 @@ function Backtest({ selectedPair, activePairs, onPairChange, recentPairs: _recen
                   </>
                 )}
               </button>
+
+              <div className="mt-6">
+                <StrategyCatalog
+                  strategies={strategies}
+                  onSelectStrategy={setSelectedStrategy}
+                  onActivate={async (strategy, mode) => {
+                    await api.activateStrategy(strategy.id, mode, true)
+                    const data = await api.fetchStrategies()
+                    setStrategies(data.results || [])
+                    setSelectedStrategy(strategy)
+                  }}
+                />
+                <div className="mt-4">
+                  <AutomationTemplateCard strategy={selectedStrategy} />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -232,7 +281,7 @@ function Backtest({ selectedPair, activePairs, onPairChange, recentPairs: _recen
                       <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                       <XAxis 
                         dataKey="time" 
-                        tickFormatter={(time) => new Date(time).toLocaleDateString()}
+                        tickFormatter={(time) => formatDateOnly(time)}
                         stroke="#94a3b8"
                       />
                       <YAxis stroke="#94a3b8" />
@@ -252,6 +301,64 @@ function Backtest({ selectedPair, activePairs, onPairChange, recentPairs: _recen
                   </ResponsiveContainer>
                 </div>
               </div>
+
+              {report && (
+                <div className="card mt-6">
+                  <h3 className="text-lg font-semibold mb-4">Breakdown Report</h3>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <p className="text-sm text-trading-muted">Source</p>
+                      <p className="text-trading-text font-semibold">{report.sourcePolicy}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-trading-muted">Trade Style</p>
+                      <p className="text-trading-text font-semibold">{report.tradeStyle}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-trading-muted">Session Focus</p>
+                      <p className="text-trading-text font-semibold">{report.bestSession}</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-4">
+                    <div className="rounded-lg border border-trading-border p-3">
+                      <p className="text-sm text-trading-muted">Source Confidence</p>
+                      <p className="text-xl font-bold text-trading-text">{report.sourceConfidence}%</p>
+                    </div>
+                    <div className="rounded-lg border border-trading-border p-3">
+                      <p className="text-sm text-trading-muted">Regime Fit</p>
+                      <p className="text-xl font-bold text-trading-text">{report.regimeFit}%</p>
+                    </div>
+                  </div>
+                  <div className="mt-6 grid grid-cols-2 gap-4">
+                    <div className="rounded-lg border border-trading-border p-3">
+                      <p className="mb-2 text-sm font-semibold text-trading-text">Session Breakdown</p>
+                      <div className="space-y-2 text-sm">
+                        {(report.sessionBreakdown || []).map((row: any) => (
+                          <div key={row.session} className="flex items-center justify-between">
+                            <span className="text-trading-muted">{row.session}</span>
+                            <span className="text-trading-text">
+                              {row.trades > 0
+                                ? `${row.trades} trades · ${row.winRate}% · ${row.netPnl >= 0 ? '+' : ''}${row.netPnl}`
+                                : `${row.barsObserved || 0} bars observed`}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-trading-border p-3">
+                      <p className="mb-2 text-sm font-semibold text-trading-text">Source Breakdown</p>
+                      <div className="space-y-2 text-sm">
+                        {(report.sourceBreakdown || []).map((row: any) => (
+                          <div key={row.source} className="flex items-center justify-between">
+                            <span className="text-trading-muted">{row.source}</span>
+                            <span className="text-trading-text">{row.weight}% · conf {row.confidence}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <div className="card h-96 flex items-center justify-center">

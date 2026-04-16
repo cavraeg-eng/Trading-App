@@ -2,6 +2,10 @@
 
 from trading_bot.features.indicators import TechnicalIndicators
 from trading_bot.features.engineering import FeatureEngineer
-from trading_bot.features.store import FeatureStore
+
+try:
+    from trading_bot.features.store import FeatureStore
+except Exception:
+    FeatureStore = None
 
 __all__ = ["TechnicalIndicators", "FeatureEngineer", "FeatureStore"]

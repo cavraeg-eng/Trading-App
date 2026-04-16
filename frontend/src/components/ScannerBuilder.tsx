@@ -1,242 +1,505 @@
-import { X, Plus } from 'lucide-react';
-import type { IndicatorCondition } from '../types';
+import { useMemo, useState } from 'react'
+import { X, Plus, Search, RotateCcw, Filter, Layers3, GitBranchPlus, Network, ChevronDown, ChevronUp } from 'lucide-react'
+import type {
+  ForexPair,
+  IndicatorCondition,
+  ScannerConditionGroup,
+  ScannerIndicatorDefinition,
+  ScannerLogic,
+} from '../types'
 
 interface ScannerBuilderProps {
-  conditions: IndicatorCondition[];
-  onConditionsChange: (conditions: IndicatorCondition[]) => void;
-  logic: 'AND' | 'OR';
-  onLogicChange: (logic: 'AND' | 'OR') => void;
-  selectedPairs: string[];
-  onPairsChange: (pairs: string[]) => void;
-  onRunScan: () => void;
-  isScanning: boolean;
-  allPairs: { symbol: string; name: string }[];
+  groups: ScannerConditionGroup[]
+  onGroupsChange: (groups: ScannerConditionGroup[]) => void
+  logic: ScannerLogic
+  onLogicChange: (logic: ScannerLogic) => void
+  selectedPairs: string[]
+  onPairsChange: (pairs: string[]) => void
+  onRunScan: () => void
+  onReset: () => void
+  isScanning: boolean
+  allPairs: ForexPair[]
+  supportedIndicators: ScannerIndicatorDefinition[]
+  categoryFilter: ForexPair['category'] | 'all'
+  onUseCategoryUniverse: () => void
+  scopeLabel: string
+  onAddGroup: () => void
+  onRemoveGroup: (groupId: string) => void
+  showRunButton?: boolean
 }
 
-const INDICATORS = [
-  'RSI',
-  'MACD',
-  'Bollinger Bands',
-  'EMA',
-  'ATR',
-  'Volume',
-  'Stochastic',
-  'OBV',
-  'Williams %R',
-];
+const OPERATOR_LABELS: Record<string, string> = {
+  '>': 'greater than',
+  '<': 'less than',
+  '>=': 'greater or equal',
+  '<=': 'less or equal',
+  '=': 'equals',
+  between: 'between',
+  crosses_above: 'crosses above',
+  crosses_below: 'crosses below',
+}
 
-const OPERATORS = [
-  { value: '>', label: '>' },
-  { value: '<', label: '<' },
-  { value: '=', label: '=' },
-  { value: '>=', label: '>=' },
-  { value: '<=', label: '<=' },
-  { value: 'crosses_above', label: 'crosses above' },
-  { value: 'crosses_below', label: 'crosses below' },
-  { value: 'between', label: 'between' },
-];
+function defaultCondition(indicators: ScannerIndicatorDefinition[]): IndicatorCondition {
+  const rsi = indicators.find((indicator) => indicator.key === 'RSI') ?? indicators[0]
+  return {
+    indicator: rsi?.key || 'RSI',
+    operator: rsi?.operators?.[0] || '<',
+    value: rsi?.defaultValue ?? 30,
+  }
+}
 
 export default function ScannerBuilder({
-  conditions,
-  onConditionsChange,
+  groups,
+  onGroupsChange,
   logic,
   onLogicChange,
   selectedPairs,
   onPairsChange,
   onRunScan,
+  onReset,
   isScanning,
   allPairs,
+  supportedIndicators,
+  categoryFilter,
+  onUseCategoryUniverse,
+  scopeLabel,
+  onAddGroup,
+  onRemoveGroup,
+  showRunButton = true,
 }: ScannerBuilderProps) {
-  const addCondition = () => {
-    onConditionsChange([
-      ...conditions,
-      { indicator: 'RSI', operator: '>', value: 50 },
-    ]);
-  };
+  const [searchQuery, setSearchQuery] = useState('')
+  const [universeExpanded, setUniverseExpanded] = useState(false)
 
-  const removeCondition = (index: number) => {
-    onConditionsChange(conditions.filter((_, i) => i !== index));
-  };
+  const indicatorMap = useMemo(
+    () => Object.fromEntries(supportedIndicators.map((indicator) => [indicator.key, indicator])),
+    [supportedIndicators]
+  )
 
-  const updateCondition = (
-    index: number,
-    field: keyof IndicatorCondition,
-    value: string | number
-  ) => {
-    const updated = [...conditions];
-    if (field === 'value' || field === 'value2') {
-      updated[index] = { ...updated[index], [field]: Number(value) };
-    } else {
-      updated[index] = { ...updated[index], [field]: value as string };
+  const addCondition = (groupId: string) => {
+    onGroupsChange(
+      groups.map((group) =>
+        group.id === groupId
+          ? {
+              ...group,
+              conditions: [...group.conditions, defaultCondition(supportedIndicators)],
+            }
+          : group
+      )
+    )
+  }
+
+  const removeCondition = (groupId: string, index: number) => {
+    onGroupsChange(
+      groups.map((group) =>
+        group.id === groupId
+          ? {
+              ...group,
+              conditions: group.conditions.filter((_, conditionIndex) => conditionIndex !== index),
+            }
+          : group
+      )
+    )
+  }
+
+  const updateCondition = (groupId: string, index: number, nextCondition: IndicatorCondition) => {
+    onGroupsChange(
+      groups.map((group) => {
+        if (group.id !== groupId) return group
+        const updatedConditions = [...group.conditions]
+        updatedConditions[index] = nextCondition
+        return { ...group, conditions: updatedConditions }
+      })
+    )
+  }
+
+  const filteredPairs = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase()
+    const pairsByCategory =
+      categoryFilter === 'all'
+        ? allPairs
+        : allPairs.filter((pair) => pair.category === categoryFilter)
+
+    if (!normalizedQuery) return pairsByCategory
+
+    return pairsByCategory.filter((pair) => {
+      const label = `${pair.symbol} ${pair.name} ${pair.nickname}`.toLowerCase()
+      return label.includes(normalizedQuery)
+    })
+  }, [allPairs, categoryFilter, searchQuery])
+
+  const togglePair = (symbol: string) => {
+    if (selectedPairs.includes(symbol)) {
+      onPairsChange(selectedPairs.filter((pair) => pair !== symbol))
+      return
     }
-    onConditionsChange(updated);
-  };
+    onPairsChange([...selectedPairs, symbol])
+  }
 
-  const isAllPairs = selectedPairs.length === 0;
+  const selectVisiblePairs = () => {
+    const visibleSymbols = filteredPairs.map((pair) => pair.symbol)
+    const merged = Array.from(new Set([...selectedPairs, ...visibleSymbols]))
+    onPairsChange(merged)
+  }
+
+  const clearPairSelection = () => onPairsChange([])
+
+  const hasCustomSelection = selectedPairs.length > 0
+  const pairSelectionSummary = hasCustomSelection
+    ? `${selectedPairs.length} selected`
+    : `Using ${scopeLabel}`
+
+  const totalConditions = groups.reduce((sum, group) => sum + group.conditions.length, 0)
+
+  const pairCount = hasCustomSelection
+    ? selectedPairs.length
+    : (categoryFilter === 'all' ? allPairs : allPairs.filter((p) => p.category === categoryFilter)).length
 
   return (
-    <div className="space-y-6">
-      {/* Conditions */}
+    <div className="space-y-4">
+      {/* Matching logic — compact single line */}
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-trading-border bg-trading-bg px-3 py-2.5">
+        <div className="flex items-center gap-2 text-sm">
+          <Network size={14} className="text-trading-accent" />
+          <span className="font-medium text-trading-text">
+            {logic === 'AND' ? 'Match all' : 'Match any'} groups
+          </span>
+          <span className="text-trading-muted">
+            ({groups.length} {groups.length === 1 ? 'group' : 'groups'}, {totalConditions} {totalConditions === 1 ? 'rule' : 'rules'})
+          </span>
+        </div>
+        <div className="flex rounded-md border border-trading-border bg-trading-card p-0.5">
+          {(['AND', 'OR'] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => onLogicChange(mode)}
+              className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+                logic === mode ? 'bg-trading-accent text-white' : 'text-trading-muted hover:text-trading-text'
+              }`}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Condition groups */}
       <div className="space-y-3">
-        {conditions.map((condition, index) => (
-          <div key={index} className="space-y-2">
-            {index > 0 && (
-              <div className="flex justify-center">
+        {groups.map((group, groupIndex) => (
+          <div key={group.id} className="rounded-lg border border-trading-border bg-trading-bg p-3">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-trading-text">{group.name || `Group ${groupIndex + 1}`}</span>
+                <span className="rounded-full bg-trading-card px-2 py-0.5 text-[10px] uppercase tracking-wide text-trading-muted">
+                  {group.logic}
+                </span>
+              </div>
+              <div className="flex gap-1.5">
+                <div className="flex rounded-md border border-trading-border bg-trading-card p-0.5">
+                  {(['AND', 'OR'] as const).map((mode) => (
+                    <button
+                      key={`${group.id}-${mode}`}
+                      onClick={() =>
+                        onGroupsChange(
+                          groups.map((item) => (item.id === group.id ? { ...item, logic: mode } : item))
+                        )
+                      }
+                      className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                        group.logic === mode ? 'bg-trading-accent text-white' : 'text-trading-muted hover:text-trading-text'
+                      }`}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
                 <button
-                  onClick={() => onLogicChange(logic === 'AND' ? 'OR' : 'AND')}
-                  className="px-3 py-1 text-xs font-medium rounded-full bg-trading-border text-trading-text hover:bg-trading-accent transition-colors"
+                  onClick={() => onRemoveGroup(group.id)}
+                  disabled={groups.length === 1}
+                  className="rounded-md border border-trading-border px-2.5 py-1 text-xs font-medium text-trading-muted transition-colors hover:text-trading-sell disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {logic}
+                  Remove
                 </button>
               </div>
-            )}
-            <div className="flex items-center gap-2 bg-trading-bg p-3 rounded-lg border border-trading-border">
-              <select
-                value={condition.indicator}
-                onChange={(e) =>
-                  updateCondition(index, 'indicator', e.target.value)
-                }
-                className="flex-1 bg-trading-card border border-trading-border rounded px-3 py-2 text-sm text-trading-text focus:outline-none focus:border-trading-accent"
-              >
-                {INDICATORS.map((ind) => (
-                  <option key={ind} value={ind}>
-                    {ind}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={condition.operator}
-                onChange={(e) =>
-                  updateCondition(index, 'operator', e.target.value)
-                }
-                className="w-32 bg-trading-card border border-trading-border rounded px-3 py-2 text-sm text-trading-text focus:outline-none focus:border-trading-accent"
-              >
-                {OPERATORS.map((op) => (
-                  <option key={op.value} value={op.value}>
-                    {op.label}
-                  </option>
-                ))}
-              </select>
-
-              <input
-                type="number"
-                value={condition.value}
-                onChange={(e) =>
-                  updateCondition(index, 'value', e.target.value)
-                }
-                className="w-20 bg-trading-card border border-trading-border rounded px-3 py-2 text-sm text-trading-text focus:outline-none focus:border-trading-accent"
-                placeholder="Value"
-              />
-
-              {condition.operator === 'between' && (
-                <>
-                  <span className="text-trading-muted text-sm">and</span>
-                  <input
-                    type="number"
-                    value={condition.value2 || ''}
-                    onChange={(e) =>
-                      updateCondition(index, 'value2', e.target.value)
-                    }
-                    className="w-20 bg-trading-card border border-trading-border rounded px-3 py-2 text-sm text-trading-text focus:outline-none focus:border-trading-accent"
-                    placeholder="Value 2"
-                  />
-                </>
-              )}
-
-              <button
-                onClick={() => removeCondition(index)}
-                className="p-2 text-trading-muted hover:text-trading-sell transition-colors"
-                disabled={conditions.length === 1}
-              >
-                <X size={18} />
-              </button>
             </div>
+
+            <div className="space-y-2">
+              {group.conditions.map((condition, index) => {
+                const indicator = indicatorMap[condition.indicator] ?? supportedIndicators[0]
+                const operators = indicator?.operators ?? []
+                const compareCandidates = supportedIndicators.filter((item) => item.key !== condition.indicator)
+                const usesBetween = condition.operator === 'between'
+                const supportsCompare = !!indicator?.supportsCompareIndicator && !usesBetween
+                const valueRange = indicator?.range
+
+                return (
+                  <div key={`${group.id}-${condition.indicator}-${index}`} className="rounded-lg border border-trading-border/60 bg-trading-card p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-trading-muted">
+                        {indicator?.description || `Condition ${index + 1}`}
+                      </span>
+                      <button
+                        onClick={() => removeCondition(group.id, index)}
+                        className="rounded p-1 text-trading-muted transition-colors hover:bg-trading-bg hover:text-trading-sell disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={group.conditions.length === 1}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+
+                    <div className="grid gap-2 lg:grid-cols-[1.3fr_1fr_1fr_1fr]">
+                      <select
+                        value={condition.indicator}
+                        onChange={(event) => {
+                          const nextIndicator = indicatorMap[event.target.value] ?? supportedIndicators[0]
+                          updateCondition(group.id, index, {
+                            indicator: nextIndicator.key,
+                            operator: nextIndicator.operators[0],
+                            value: nextIndicator.defaultValue,
+                          })
+                        }}
+                        className="w-full rounded-md border border-trading-border bg-trading-bg px-2.5 py-1.5 text-sm text-trading-text focus:border-trading-accent focus:outline-none"
+                      >
+                        {supportedIndicators.map((item) => (
+                          <option key={item.key} value={item.key}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </select>
+
+                      <select
+                        value={condition.operator}
+                        onChange={(event) => {
+                          const nextOperator = event.target.value
+                          updateCondition(group.id, index, {
+                            ...condition,
+                            operator: nextOperator,
+                            value2: nextOperator === 'between' ? condition.value2 ?? condition.value + (valueRange?.step ?? 1) * 5 : undefined,
+                            compare_indicator: nextOperator === 'between' ? undefined : condition.compare_indicator,
+                          })
+                        }}
+                        className="w-full rounded-md border border-trading-border bg-trading-bg px-2.5 py-1.5 text-sm text-trading-text focus:border-trading-accent focus:outline-none"
+                      >
+                        {operators.map((operator) => (
+                          <option key={operator} value={operator}>
+                            {OPERATOR_LABELS[operator] || operator}
+                          </option>
+                        ))}
+                      </select>
+
+                      {supportsCompare ? (
+                        <div className="space-y-1.5">
+                          <select
+                            value={condition.compare_indicator ?? ''}
+                            onChange={(event) =>
+                              updateCondition(group.id, index, {
+                                ...condition,
+                                compare_indicator: event.target.value || undefined,
+                              })
+                            }
+                            className="w-full rounded-md border border-trading-border bg-trading-bg px-2.5 py-1.5 text-sm text-trading-text focus:border-trading-accent focus:outline-none"
+                          >
+                            <option value="">Numeric value</option>
+                            {compareCandidates.map((candidate) => (
+                              <option key={candidate.key} value={candidate.key}>
+                                {candidate.label}
+                              </option>
+                            ))}
+                          </select>
+                          {!condition.compare_indicator ? (
+                            <input
+                              type="number"
+                              min={valueRange?.min}
+                              max={valueRange?.max}
+                              step={valueRange?.step}
+                              value={condition.value}
+                              onChange={(event) =>
+                                updateCondition(group.id, index, {
+                                  ...condition,
+                                  value: Number(event.target.value),
+                                })
+                              }
+                              className="w-full rounded-md border border-trading-border bg-trading-bg px-2.5 py-1.5 text-sm text-trading-text focus:border-trading-accent focus:outline-none"
+                            />
+                          ) : null}
+                        </div>
+                      ) : (
+                        <input
+                          type="number"
+                          min={valueRange?.min}
+                          max={valueRange?.max}
+                          step={valueRange?.step}
+                          value={condition.value}
+                          onChange={(event) =>
+                            updateCondition(group.id, index, {
+                              ...condition,
+                              value: Number(event.target.value),
+                            })
+                          }
+                          className="w-full rounded-md border border-trading-border bg-trading-bg px-2.5 py-1.5 text-sm text-trading-text focus:border-trading-accent focus:outline-none"
+                        />
+                      )}
+
+                      {usesBetween ? (
+                        <input
+                          type="number"
+                          min={valueRange?.min}
+                          max={valueRange?.max}
+                          step={valueRange?.step}
+                          value={condition.value2 ?? ''}
+                          onChange={(event) =>
+                            updateCondition(group.id, index, {
+                              ...condition,
+                              value2: Number(event.target.value),
+                            })
+                          }
+                          className="w-full rounded-md border border-trading-border bg-trading-bg px-2.5 py-1.5 text-sm text-trading-text focus:border-trading-accent focus:outline-none"
+                        />
+                      ) : (
+                        <div className="rounded-md border border-dashed border-trading-border/40 bg-trading-bg px-2.5 py-1.5 text-sm text-trading-muted">
+                          &mdash;
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            <button
+              onClick={() => addCondition(group.id)}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-trading-muted transition-colors hover:text-trading-accent"
+            >
+              <Plus size={14} />
+              Add condition
+            </button>
           </div>
         ))}
       </div>
 
-      {/* Add Condition Button */}
-      <button
-        onClick={addCondition}
-        className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-dashed border-trading-border rounded-lg text-trading-muted hover:border-trading-accent hover:text-trading-accent transition-colors"
-      >
-        <Plus size={18} />
-        <span>Add Condition</span>
-      </button>
-
-      {/* Pair Scope Selector */}
-      <div className="space-y-3 pt-4 border-t border-trading-border">
-        <label className="text-sm font-medium text-trading-text">
-          Scan Scope
-        </label>
-        <div className="flex gap-2">
-          <button
-            onClick={() => onPairsChange([])}
-            className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              isAllPairs
-                ? 'bg-trading-accent text-white'
-                : 'bg-trading-card text-trading-muted hover:text-trading-text'
-            }`}
-          >
-            All Pairs
-          </button>
-          <button
-            onClick={() => onPairsChange([allPairs[0]?.symbol || 'EUR/USD'])}
-            className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              !isAllPairs
-                ? 'bg-trading-accent text-white'
-                : 'bg-trading-card text-trading-muted hover:text-trading-text'
-            }`}
-          >
-            Select Pairs
-          </button>
-        </div>
-
-        {!isAllPairs && (
-          <div className="max-h-40 overflow-y-auto bg-trading-bg border border-trading-border rounded-lg p-2">
-            {allPairs.map((pair) => (
-              <label
-                key={pair.symbol}
-                className="flex items-center gap-2 px-2 py-1.5 hover:bg-trading-card rounded cursor-pointer"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedPairs.includes(pair.symbol)}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      onPairsChange([...selectedPairs, pair.symbol]);
-                    } else {
-                      onPairsChange(
-                        selectedPairs.filter((s) => s !== pair.symbol)
-                      );
-                    }
-                  }}
-                  className="rounded border-trading-border text-trading-accent focus:ring-trading-accent"
-                />
-                <span className="text-sm text-trading-text">{pair.symbol}</span>
-                <span className="text-xs text-trading-muted">{pair.name}</span>
-              </label>
-            ))}
-          </div>
-        )}
+      {/* Group actions */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={onAddGroup}
+          className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-trading-border px-3 py-1.5 text-xs font-medium text-trading-muted transition-colors hover:border-trading-accent hover:text-trading-accent"
+        >
+          <GitBranchPlus size={14} />
+          Add group
+        </button>
+        <button
+          onClick={() => addCondition(groups[0]?.id)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-trading-border px-3 py-1.5 text-xs font-medium text-trading-muted transition-colors hover:border-trading-accent hover:text-trading-accent"
+        >
+          <Plus size={14} />
+          Add condition
+        </button>
+        <button
+          onClick={onReset}
+          className="inline-flex items-center gap-1.5 rounded-md border border-trading-border px-3 py-1.5 text-xs font-medium text-trading-muted transition-colors hover:text-trading-text"
+        >
+          <RotateCcw size={14} />
+          Reset
+        </button>
       </div>
 
-      {/* Run Scan Button */}
-      <button
-        onClick={onRunScan}
-        disabled={isScanning || conditions.length === 0}
-        className="w-full py-3 bg-trading-accent text-white font-medium rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-      >
-        {isScanning ? (
-          <>
-            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            <span>Scanning...</span>
-          </>
-        ) : (
-          <span>Run Scan</span>
-        )}
-      </button>
+      {/* Scan universe — collapsible */}
+      <div className="rounded-lg border border-trading-border bg-trading-bg">
+        <button
+          onClick={() => setUniverseExpanded(!universeExpanded)}
+          className="flex w-full items-center justify-between px-3 py-2.5 text-left"
+        >
+          <div className="flex items-center gap-2">
+            <Layers3 size={14} className="text-trading-accent" />
+            <span className="text-sm font-medium text-trading-text">Scan universe</span>
+            <span className="text-xs text-trading-muted">
+              {pairSelectionSummary} ({pairCount} pairs)
+            </span>
+          </div>
+          <span className="text-trading-muted">
+            {universeExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </span>
+        </button>
+
+        {universeExpanded ? (
+          <div className="border-t border-trading-border px-3 pb-3 pt-3">
+            <div className="mb-2 flex flex-wrap gap-2">
+              <button
+                onClick={onUseCategoryUniverse}
+                className="rounded-md border border-trading-border px-2.5 py-1 text-xs text-trading-muted transition-colors hover:text-trading-text"
+              >
+                Use {scopeLabel}
+              </button>
+              <button
+                onClick={selectVisiblePairs}
+                className="rounded-md border border-trading-border px-2.5 py-1 text-xs text-trading-muted transition-colors hover:text-trading-text"
+              >
+                Select visible
+              </button>
+              <button
+                onClick={clearPairSelection}
+                className="rounded-md border border-trading-border px-2.5 py-1 text-xs text-trading-muted transition-colors hover:text-trading-text"
+              >
+                Clear
+              </button>
+            </div>
+
+            <div className="mb-2 flex items-center gap-2 rounded-md border border-trading-border bg-trading-card px-2.5 py-1.5">
+              <Search size={14} className="text-trading-muted" />
+              <input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search pairs..."
+                className="w-full bg-transparent text-sm text-trading-text placeholder:text-trading-muted focus:outline-none"
+              />
+              <Filter size={14} className="text-trading-muted" />
+            </div>
+
+            <div className="grid max-h-48 gap-1.5 overflow-y-auto rounded-md border border-trading-border bg-trading-card p-1.5 md:grid-cols-2">
+              {filteredPairs.map((pair) => {
+                const checked = selectedPairs.includes(pair.symbol)
+                return (
+                  <label
+                    key={pair.symbol}
+                    className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 transition-colors ${
+                      checked ? 'border-trading-accent bg-trading-accent/10' : 'border-transparent hover:border-trading-border'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => togglePair(pair.symbol)}
+                      className="rounded border-trading-border text-trading-accent focus:ring-trading-accent"
+                    />
+                    <span className="text-sm font-medium text-trading-text">{pair.symbol}</span>
+                    <span className="text-xs text-trading-muted">{pair.name}</span>
+                  </label>
+                )
+              })}
+              {filteredPairs.length === 0 ? (
+                <div className="col-span-full px-3 py-4 text-center text-sm text-trading-muted">
+                  No pairs match your filter.
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Run scan button — conditionally shown */}
+      {showRunButton ? (
+        <button
+          onClick={onRunScan}
+          disabled={isScanning || totalConditions === 0}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-trading-accent py-2.5 font-medium text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isScanning ? (
+            <>
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+              Scanning...
+            </>
+          ) : (
+            'Run scan'
+          )}
+        </button>
+      ) : null}
     </div>
-  );
+  )
 }

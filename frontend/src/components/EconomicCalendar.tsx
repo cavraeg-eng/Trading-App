@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { CalendarDays } from 'lucide-react'
 import type { ForexPair } from '../types'
+import { formatDateOnly } from '../lib/time'
 
 interface EconomicCalendarProps {
   selectedPair: ForexPair
@@ -128,7 +129,7 @@ function generateUpcomingEvents(currencies: string[]): EconomicEvent[] {
 }
 
 function formatEventDate(d: Date): string {
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return formatDateOnly(d)
 }
 
 const impactStyles: Record<string, { dot: string; text: string }> = {

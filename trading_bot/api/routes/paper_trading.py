@@ -3,7 +3,10 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 import asyncio
+import time
 import uuid
+
+from trading_bot.persistence import repositories as repo
 
 router = APIRouter(prefix="/api/trading", tags=["paper_trading"])
 
@@ -32,6 +35,7 @@ class PaperOrderRequest(BaseModel):
     risk_percent: Optional[float] = None
     trade_style: Optional[str] = None
     confidence: Optional[float] = None
+    strategy_id: Optional[str] = None
 
 @router.post("/paper-order")
 async def place_paper_order(order: PaperOrderRequest):
@@ -72,12 +76,36 @@ async def place_paper_order(order: PaperOrderRequest):
             "risk_percent": order.risk_percent,
             "trade_style": order.trade_style,
             "confidence": order.confidence,
+            "strategy_id": order.strategy_id,
             "pnl": 0.0,
         }
 
         # Add to positions
         _paper_account["positions"].append(trade)
         _paper_account["trades_history"].append(trade)
+        try:
+            repo.insert_paper_order(
+                {
+                    "trade_id": trade_id,
+                    "symbol": order.symbol,
+                    "side": order.side,
+                    "quantity": round(order.quantity, 2),
+                    "entry_price": entry_price,
+                    "stop_loss": order.stop_loss,
+                    "take_profit_1": order.take_profit_1,
+                    "take_profit_2": order.take_profit_2,
+                    "take_profit_3": order.take_profit_3,
+                    "status": "filled",
+                    "pnl": 0.0,
+                    "risk_percent": order.risk_percent,
+                    "trade_style": order.trade_style,
+                    "strategy_id": order.strategy_id,
+                    "confidence": order.confidence,
+                    "opened_at": str(time.time()),
+                }
+            )
+        except Exception:
+            pass
     
         return {
             "success": True,
@@ -96,16 +124,28 @@ async def place_paper_order(order: PaperOrderRequest):
 @router.get("/paper-positions")
 async def get_paper_positions():
     """Get current paper trading positions."""
+    try:
+        positions = repo.get_paper_positions()
+        if positions:
+            return {"positions": positions}
+    except Exception:
+        pass
     return {"positions": _paper_account["positions"]}
 
 @router.get("/paper-account")
 async def get_paper_account():
     """Get paper trading account summary."""
+    try:
+        persisted = repo.get_paper_account()
+        total_positions = len(repo.get_paper_positions())
+    except Exception:
+        persisted = None
+        total_positions = len(_paper_account["positions"])
     return {
-        "balance": round(_paper_account["balance"], 2),
-        "equity": round(_paper_account["equity"], 2),
-        "initial_balance": _paper_account["initial_balance"],
-        "total_positions": len(_paper_account["positions"]),
+        "balance": round((persisted or _paper_account)["balance"], 2),
+        "equity": round((persisted or _paper_account)["equity"], 2),
+        "initial_balance": (persisted or _paper_account)["initial_balance"],
+        "total_positions": total_positions,
         "total_trades": len(_paper_account["trades_history"]),
     }
 
@@ -116,4 +156,8 @@ async def reset_paper_account():
     _paper_account["equity"] = 10000.0
     _paper_account["positions"] = []
     _paper_account["trades_history"] = []
+    try:
+        repo.reset_paper_account()
+    except Exception:
+        pass
     return {"success": True, "message": "Paper account reset to $10,000"}

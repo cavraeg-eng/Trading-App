@@ -3,15 +3,16 @@
 import random
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Query
 
 from trading_bot.api.models import SignalBreakdown, SignalDirection, SignalStatus
-from trading_bot.api.routes.market import get_shared_ohlcv, analyze_symbol
+from trading_bot.api.routes.market import get_shared_ohlcv, analyze_symbol, compute_ai_score, get_shared_ohlcv_with_metadata
 from trading_bot.config import get_logger
+from trading_bot.persistence import repositories as repo
 
 logger = get_logger(__name__)
 
@@ -41,13 +42,13 @@ SYMBOL_BASE_PRICES = {
 # (Now uses shared OHLCV cache from market.py with its own 5-second TTL)
 
 
-def get_base_price(symbol: str, timeframe: str = "1h") -> Tuple[float, str]:
+def get_base_price(symbol: str, timeframe: str = "1h", trade_style: str = "swing") -> Tuple[float, str]:
     """Get current price using shared OHLCV cache, falling back to hardcoded prices.
 
     Returns (price, source) where source is 'live' or 'mock'.
     """
     try:
-        df = get_shared_ohlcv(symbol, timeframe)
+        df = get_shared_ohlcv(symbol, timeframe, trade_style=trade_style)
         if df is not None and len(df) > 0:
             live_price = float(df["close"].iloc[-1])
             if live_price > 0:
@@ -58,6 +59,25 @@ def get_base_price(symbol: str, timeframe: str = "1h") -> Tuple[float, str]:
     # Fallback to hardcoded prices
     logger.info(f"Using fallback price for {symbol}")
     return SYMBOL_BASE_PRICES.get(symbol, 1.0 + random.random()), "mock"
+
+
+def get_base_price_metadata(symbol: str, timeframe: str = "1h", trade_style: str = "swing") -> dict:
+    """Get source metadata for the current symbol price."""
+    try:
+        resolved_timeframe = "1m" if trade_style == "scalp" and timeframe not in ("1m", "5m") else timeframe
+        _, metadata = get_shared_ohlcv_with_metadata(symbol, resolved_timeframe, trade_style=trade_style)
+        return metadata
+    except Exception:
+        return {
+            "sourceName": "mock",
+            "sourceType": "mock",
+            "priceSource": "mock",
+            "isFallback": True,
+            "freshnessSeconds": None,
+            "qualityFlags": ["mock_data"],
+            "lastBarTimestamp": None,
+            "marketStatus": "stale",
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -89,8 +109,8 @@ class ActiveSignal:
 
 
 # Module-level stores
-_active_signals: Dict[str, ActiveSignal] = {}  # symbol -> active signal
-_cooldown_until: Dict[str, float] = {}  # symbol -> timestamp when cooldown ends
+_active_signals: Dict[str, ActiveSignal] = {}  # signal_key -> active signal
+_cooldown_until: Dict[str, float] = {}  # signal_key -> timestamp when cooldown ends
 _signal_lock = threading.RLock()
 
 # Cooldown = 1 candle after a signal resolves
@@ -118,24 +138,74 @@ def _cleanup_stale_signals():
             _cooldown_until.pop(k, None)
 
 
-def _resolve_signal(symbol: str, reason: str, timeframe: str) -> None:
+def _signal_key(symbol: str, timeframe: str, trade_style: str) -> str:
+    return f"{symbol}|{timeframe}|{trade_style}"
+
+
+def _signal_id(symbol: str, timeframe: str, trade_style: str, created_at: float) -> str:
+    return f"{symbol}|{timeframe}|{trade_style}|{int(created_at)}"
+
+
+def _persist_signal_outcome(sig: ActiveSignal, reason: str, exit_price: Optional[float]) -> None:
+    resolved_at = time.time()
+    final_price = float(exit_price if exit_price is not None else sig.entry_price)
+    price_delta = final_price - float(sig.entry_price)
+
+    if reason == "TP_HIT":
+        direction_correct = 1
+    elif reason == "SL_HIT":
+        direction_correct = 0
+    elif sig.direction == "BUY":
+        direction_correct = 1 if price_delta > 0 else 0
+    elif sig.direction == "SELL":
+        direction_correct = 1 if price_delta < 0 else 0
+    else:
+        tolerance = max(abs(float(sig.entry_price)) * 0.0002, 1e-9)
+        direction_correct = 1 if abs(price_delta) <= tolerance else 0
+
+    if sig.direction == "BUY":
+        pnl_pips = price_delta
+    elif sig.direction == "SELL":
+        pnl_pips = -price_delta
+    else:
+        pnl_pips = -abs(price_delta)
+
+    try:
+        repo.insert_signal_outcome({
+            "signal_id": _signal_id(sig.symbol, sig.timeframe, sig.price_source, sig.created_at),
+            "resolved_reason": reason,
+            "resolved_at": resolved_at,
+            "exit_price": final_price,
+            "pnl_pips": float(pnl_pips),
+            "direction_correct": int(direction_correct),
+        })
+    except Exception as exc:
+        logger.warning(f"Failed to persist signal outcome for {sig.symbol}: {exc}")
+
+
+def _resolve_signal(symbol: str, reason: str, timeframe: str, trade_style: str, exit_price: Optional[float] = None) -> None:
     """Mark a signal as resolved and start cooldown (only for executed signals)."""
+    key = _signal_key(symbol, timeframe, trade_style)
     with _signal_lock:
-        sig = _active_signals.get(symbol)
+        sig = _active_signals.get(key)
         if sig and not sig.resolved:
             sig.resolved = True
             sig.resolved_reason = reason
             sig.resolved_at = time.time()
+            _persist_signal_outcome(sig, reason, exit_price)
         # Cooldown only applies after execution (TP/SL hit), NOT after natural expiration
         if reason in ("TP_HIT", "SL_HIT"):
             candle_seconds = TIMEFRAME_SECONDS.get(timeframe, 3600)
-            _cooldown_until[symbol] = time.time() + COOLDOWN_CANDLES * candle_seconds
+            _cooldown_until[key] = time.time() + COOLDOWN_CANDLES * candle_seconds
 
 
 def _build_response(sig: ActiveSignal, signal_status: SignalStatus,
                     expires_at: datetime, cooldown_remaining: float = 0) -> dict:
     """Build the breakdown response dict from an ActiveSignal."""
     now = time.time()
+    metadata = get_base_price_metadata(sig.symbol, sig.timeframe, trade_style=sig.price_source)
+    market_price, market_source = get_base_price(sig.symbol, sig.timeframe, trade_style=sig.price_source)
+    effective_status = SignalStatus.VALID if sig.direction == "HOLD" else signal_status
     return {
         "symbol": sig.symbol,
         "direction": sig.direction,
@@ -144,7 +214,7 @@ def _build_response(sig: ActiveSignal, signal_status: SignalStatus,
         "signal_strength": sig.signal_strength,
         "pattern_accuracy": sig.pattern_accuracy,
         "timestamp": datetime.fromtimestamp(sig.created_at, tz=timezone.utc).isoformat(),
-        "signal_status": signal_status.value,
+        "signal_status": effective_status.value,
         "expires_at": expires_at.isoformat(),
         "entry_min": sig.entry_min,
         "entry_max": sig.entry_max,
@@ -153,16 +223,25 @@ def _build_response(sig: ActiveSignal, signal_status: SignalStatus,
         "take_profit2": sig.take_profit2,
         "take_profit3": sig.take_profit3,
         # New persistence fields
-        "signal_id": f"{sig.symbol}_{int(sig.created_at)}",
+        "signal_id": _signal_id(sig.symbol, sig.timeframe, sig.price_source, sig.created_at),
         "cooldown_remaining": max(0, int(cooldown_remaining)),
         "signal_age_seconds": int(now - sig.created_at),
         "resolved_reason": sig.resolved_reason,
-        "price_source": sig.price_source,
+        "price_source": market_source,
+        "trade_style": sig.price_source,
+        "current_price": market_price,
+        "source_metadata": metadata,
         "prediction_source": "heuristic",
+        "anchorPerformance": repo.get_signal_outcome_summary(
+            symbol=sig.symbol,
+            timeframe=sig.timeframe,
+            direction=sig.direction,
+            limit=100,
+        ),
     }
 
 
-def get_or_create_signal(symbol: str, timeframe: str) -> dict:
+def get_or_create_signal(symbol: str, timeframe: str, trade_style: str = "swing") -> dict:
     """Return an existing active signal if still valid, or create a new one.
 
     Lifecycle:
@@ -176,38 +255,39 @@ def get_or_create_signal(symbol: str, timeframe: str) -> dict:
     """
     now = time.time()
     candle_seconds = TIMEFRAME_SECONDS.get(timeframe, 3600)
+    key = _signal_key(symbol, timeframe, trade_style)
 
     # ---- 1 & 2: Existing active signal? ----------------------------------
     with _signal_lock:
-        sig = _active_signals.get(symbol)
+        sig = _active_signals.get(key)
     if sig and not sig.resolved:
         # Fetch current price from live data
-        base_price, _src = get_base_price(symbol, timeframe)
+        base_price, _src = get_base_price(symbol, timeframe, trade_style=trade_style)
         current_price = base_price  # Use actual price, no random noise
 
         # Check if price has diverged too far from signal's entry price
         price_divergence = abs(current_price - sig.entry_price) / sig.entry_price
         if price_divergence > 0.02:  # 2% divergence threshold — regenerate signal sooner
             logger.warning(f"Signal for {symbol} diverged {price_divergence:.1%} from current price, regenerating")
+            _resolve_signal(symbol, "DIVERGED", timeframe, trade_style, current_price)
             with _signal_lock:
-                _active_signals.pop(symbol, None)
+                _active_signals.pop(key, None)
             # Fall through to generate new signal
         else:
             signal_age_candles = (now - sig.created_at) / candle_seconds
 
             # Check TP / SL hits using real price comparison
             resolved_reason: Optional[str] = None
-            if signal_age_candles > 2:
-                if sig.direction == "BUY":
-                    if current_price >= sig.take_profit1:
-                        resolved_reason = "TP_HIT"
-                    elif current_price <= sig.stop_loss:
-                        resolved_reason = "SL_HIT"
-                elif sig.direction == "SELL":
-                    if current_price <= sig.take_profit1:
-                        resolved_reason = "TP_HIT"
-                    elif current_price >= sig.stop_loss:
-                        resolved_reason = "SL_HIT"
+            if sig.direction == "BUY":
+                if current_price >= sig.take_profit1:
+                    resolved_reason = "TP_HIT"
+                elif current_price <= sig.stop_loss:
+                    resolved_reason = "SL_HIT"
+            elif sig.direction == "SELL":
+                if current_price <= sig.take_profit1:
+                    resolved_reason = "TP_HIT"
+                elif current_price >= sig.stop_loss:
+                    resolved_reason = "SL_HIT"
 
             # Compute status via existing helper
             status = compute_signal_status(
@@ -223,19 +303,20 @@ def get_or_create_signal(symbol: str, timeframe: str) -> dict:
                 resolved_reason = resolved_reason or "EXPIRED"
 
             if resolved_reason:
-                _resolve_signal(symbol, resolved_reason, timeframe)
+                _resolve_signal(symbol, resolved_reason, timeframe, trade_style, current_price)
                 if resolved_reason == "EXPIRED":
                     # Expired signals skip cooldown — delete and fall through
                     # to generate a fresh signal immediately
                     with _signal_lock:
-                        _active_signals.pop(symbol, None)
-                        _cooldown_until.pop(symbol, None)
+                        _active_signals.pop(key, None)
+                        _cooldown_until.pop(key, None)
                     # Fall through to section 4 (new signal generation)
                 # For TP_HIT / SL_HIT, fall through to cooldown logic below
             else:
-                # Refresh price levels to current market data
-                fresh_analysis = analyze_symbol(symbol, timeframe, trade_style="swing")
-                if fresh_analysis is not None:
+                # Refresh price levels only after the entry window has aged a bit;
+                # otherwise the system keeps moving anchors away from the original thesis.
+                fresh_analysis = analyze_symbol(symbol, timeframe, trade_style=trade_style)
+                if fresh_analysis is not None and signal_age_candles >= 1.0:
                     # Update entry/SL/TP to track current price
                     sig.entry_min = fresh_analysis["entryRange"]["min"]
                     sig.entry_max = fresh_analysis["entryRange"]["max"]
@@ -251,11 +332,12 @@ def get_or_create_signal(symbol: str, timeframe: str) -> dict:
                     # invalidate the old signal and generate a new one
                     signal_map = {"buy": "BUY", "sell": "SELL"}
                     fresh_direction = signal_map.get(fresh_analysis["signal"], "HOLD")
-                    if fresh_direction != sig.direction and fresh_direction != "HOLD":
+                    if fresh_direction != sig.direction:
                         # Direction flipped — delete old signal and fall through to create new one
+                        _resolve_signal(symbol, "REPLACED", timeframe, trade_style, fresh_analysis["currentPrice"])
                         with _signal_lock:
-                            _active_signals.pop(symbol, None)
-                            _cooldown_until.pop(symbol, None)
+                            _active_signals.pop(key, None)
+                            _cooldown_until.pop(key, None)
                     else:
                         # Same direction — return with updated levels
                         # Also refresh indicators from fresh analysis
@@ -269,18 +351,18 @@ def get_or_create_signal(symbol: str, timeframe: str) -> dict:
                                     "contribution": contribution,
                                     "value": ind["value"]
                                 })
-                        expires_at_ts = sig.created_at + (MAX_SIGNAL_AGE_CANDLES * candle_seconds)
-                        expires_at = datetime.fromtimestamp(expires_at_ts, tz=timezone.utc)
-                        return _build_response(sig, status, expires_at)
+                expires_at_ts = sig.created_at + (MAX_SIGNAL_AGE_CANDLES * candle_seconds)
+                expires_at = datetime.fromtimestamp(expires_at_ts, tz=timezone.utc)
+                return _build_response(sig, status, expires_at)
 
     # ---- 3: Cooldown check -----------------------------------------------
     with _signal_lock:
-        cooldown_end = _cooldown_until.get(symbol, 0)
+        cooldown_end = _cooldown_until.get(key, 0)
     if now < cooldown_end:
         remaining = cooldown_end - now
         # Return a HOLD / EXPIRED placeholder during cooldown
         with _signal_lock:
-            hold_sig = _active_signals.get(symbol)
+            hold_sig = _active_signals.get(key)
         if hold_sig:
             expires_at_ts = hold_sig.created_at + (MAX_SIGNAL_AGE_CANDLES * candle_seconds)
             expires_at = datetime.fromtimestamp(expires_at_ts, tz=timezone.utc)
@@ -302,18 +384,19 @@ def get_or_create_signal(symbol: str, timeframe: str) -> dict:
             "take_profit1": 0,
             "take_profit2": 0,
             "take_profit3": 0,
-            "signal_id": f"{symbol}_cooldown",
+            "signal_id": f"{key}|cooldown",
             "cooldown_remaining": max(0, int(remaining)),
             "signal_age_seconds": 0,
             "resolved_reason": "COOLDOWN",
             "price_source": "mock",  # no active signal during cooldown
+            "source_metadata": get_base_price_metadata(symbol, timeframe, trade_style=trade_style),
         }
 
     # ---- 4: Generate a brand-new signal -----------------------------------
     # Use real technical analysis instead of random generation
-    analysis = analyze_symbol(symbol, timeframe, trade_style="swing")
+    analysis = analyze_symbol(symbol, timeframe, trade_style=trade_style)
 
-    base_price, price_source = get_base_price(symbol, timeframe)
+    base_price, price_source = get_base_price(symbol, timeframe, trade_style=trade_style)
     current_price = base_price
 
     if analysis is not None:
@@ -375,18 +458,17 @@ def get_or_create_signal(symbol: str, timeframe: str) -> dict:
         timeframe=timeframe,
         indicators=indicators,
         signal_strength=signal_strength,
-        price_source=price_source,
+        price_source=trade_style,
         pattern_accuracy=pattern_accuracy,
     )
     with _signal_lock:
-        _active_signals[symbol] = new_sig
+        _active_signals[key] = new_sig
         # Clear any lingering cooldown
-        _cooldown_until.pop(symbol, None)
+        _cooldown_until.pop(key, None)
 
     # Persist signal prediction for tracking
     try:
-        from trading_bot.persistence import repositories as repo
-        signal_id = f"{symbol}_{int(now)}"
+        signal_id = _signal_id(symbol, timeframe, trade_style, now)
         repo.insert_signal_prediction({
             "signal_id": signal_id,
             "symbol": symbol,
@@ -399,9 +481,9 @@ def get_or_create_signal(symbol: str, timeframe: str) -> dict:
             "take_profit2": take_profit2,
             "take_profit3": take_profit3,
             "timeframe": timeframe,
-            "trade_style": "swing",
+            "trade_style": trade_style,
             "source": "heuristic",
-            "price_source": price_source,
+            "price_source": trade_style,
             "created_at": now,
         })
     except Exception as e:
@@ -545,42 +627,18 @@ def generate_indicator_contributions(direction: SignalDirection) -> List[dict]:
 @router.get("/current")
 async def get_current_signals(
     symbol: Optional[str] = Query(None, description="Filter by symbol"),
-    limit: int = Query(10, ge=1, le=100)
+    limit: int = Query(10, ge=1, le=100),
+    timeframe: str = Query("1m", description="Timeframe for live signals"),
+    trade_style: str = Query("scalp", pattern="^(scalp|swing)$"),
 ) -> List[dict]:
     """Get current trading signals with full indicator breakdown."""
-    symbols = [symbol] if symbol else ["EUR/USD", "GBP/USD", "USD/JPY", "BTC/USD", "ETH/USD"]
-    
+    symbols = [symbol] if symbol else ["XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY", "BTC/USD", "ETH/USD"]
+
     signals = []
     for sym in symbols[:limit]:
-        # Randomly determine signal direction
-        rand = random.random()
-        if rand < 0.4:
-            direction = SignalDirection.BUY
-            confidence = int(random.uniform(65, 95))  # Returns 0-100 integer percentage, consistent with market.py
-        elif rand < 0.8:
-            direction = SignalDirection.SELL
-            confidence = int(random.uniform(65, 95))  # Returns 0-100 integer percentage, consistent with market.py
-        else:
-            direction = SignalDirection.HOLD
-            confidence = int(random.uniform(40, 60))  # Returns 0-100 integer percentage, consistent with market.py
-        
-        indicators = generate_indicator_contributions(direction)
-        signal_strength = int(sum(ind["contribution"] for ind in indicators) * 100)  # Returns 0-100 integer percentage
-        
-        _, sym_price_source = get_base_price(sym)
-        
-        signal = {
-            "symbol": sym,
-            "direction": direction.value,
-            "confidence": confidence,
-            "indicators": indicators,
-            "signal_strength": signal_strength,
-            "pattern_accuracy": int(random.uniform(70, 90)) if direction != SignalDirection.HOLD else None,  # Returns 0-100 integer percentage
-            "timestamp": datetime.now().isoformat(),
-            "price_source": sym_price_source,
-        }
-        signals.append(signal)
-    
+        result = get_or_create_signal(sym, timeframe, trade_style=trade_style)
+        signals.append(result)
+
     return signals
 
 
@@ -588,6 +646,7 @@ async def get_current_signals(
 async def get_signal_breakdown(
     symbol: str,
     timeframe: str = Query("1h", description="Timeframe: 1m, 5m, 15m, 1h, 4h, 1d"),
+    trade_style: str = Query("swing", pattern="^(scalp|swing)$"),
 ) -> dict:
     """Get detailed signal breakdown for a specific symbol.
 
@@ -595,15 +654,30 @@ async def get_signal_breakdown(
     resolved (TP/SL hit or expired) and the subsequent cooldown elapses.
     """
     _cleanup_stale_signals()
-    return get_or_create_signal(symbol, timeframe)
+    result = get_or_create_signal(symbol, timeframe, trade_style=trade_style)
+
+    # Attach aiScore if not already present
+    if "aiScore" not in result:
+        _dir_map = {"BUY": "buy", "SELL": "sell", "HOLD": "hold"}
+        result["aiScore"] = compute_ai_score(
+            _dir_map.get(result.get("direction", "HOLD"), "hold"),
+            float(result.get("confidence", 50)),
+            result.get("indicators", []),
+            "ranging",
+            [],
+        )
+
+    return result
 
 
 @router.post("/reset/{symbol:path}")
 async def reset_signal(symbol: str) -> dict:
     """Force-reset the signal for a symbol (for testing)."""
     with _signal_lock:
-        _active_signals.pop(symbol, None)
-        _cooldown_until.pop(symbol, None)
+        stale_keys = [key for key in _active_signals.keys() if key.startswith(f"{symbol}|")]
+        for key in stale_keys:
+            _active_signals.pop(key, None)
+            _cooldown_until.pop(key, None)
     return {"status": "reset", "symbol": symbol}
 
 

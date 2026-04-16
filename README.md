@@ -41,6 +41,7 @@ graph TB
 - **Data Pipeline**: Async CCXT integration for OHLCV, orderbook, and funding rate data
 - **Feature Engineering**: 100+ technical indicators, volatility regimes, Fourier features
 - **RL Models**: PPO/SAC with Stable-Baselines3, LSTM/Transformer feature extractors
+- **Training Regimes**: Chronological splits, walk-forward validation, persisted preprocessing artifacts
 - **Risk Management**: Kelly criterion, volatility targeting, circuit breakers
 - **Backtesting**: VectorBT integration with walk-forward and Monte Carlo analysis
 - **Monitoring**: Telegram/Discord alerts, Streamlit dashboard
@@ -142,10 +143,10 @@ python -m trading_bot.main config
 python -m trading_bot.main fetch-data --days 180
 
 # Train model
-python -m trading_bot.main train --model PPO --timesteps 100000
+python -m trading_bot.main train --model PPO --architecture lstm --timesteps 100000
 
 # Or use the training script
-python train.py --symbols BTC/USDT ETH/USDT --timesteps 100000
+python train.py --symbols BTC/USDT ETH/USDT --architecture lstm --timesteps 100000
 
 # Run backtest
 python -m trading_bot.main backtest --model ./models/PPO_20240101.zip
@@ -167,17 +168,42 @@ python -m trading_bot.main dashboard
 
 ```bash
 # Basic training
-python train.py --model PPO --timesteps 100000
+python train.py --model PPO --architecture lstm --timesteps 100000
 
 # With hyperparameter optimization
-python train.py --model PPO --timesteps 100000 --trials 50
+python train.py --model PPO --architecture transformer --timesteps 100000 --trials 50
 
 # Train on specific symbols
-python train.py --symbols BTC/USDT ETH/USDT --timesteps 50000
+python train.py --symbols BTC/USDT ETH/USDT --architecture lstm --timesteps 50000
 
 # Use existing data
-python train.py --data-path ./data --model SAC
+python train.py --data-path ./data --model SAC --architecture mlp
+
+# Run walk-forward validation
+python train.py --model PPO --architecture lstm --walk-forward --train-days 180 --test-days 30
 ```
+
+### Experiment Matrix
+
+```bash
+# Print the recommended PPO/SAC experiment matrix
+python3 run_experiment_matrix.py
+
+# Execute the full walk-forward experiment matrix
+python3 run_experiment_matrix.py --data-path ./data --execute
+
+# Summarize completed experiment folders only
+python3 run_experiment_matrix.py --summarize-only
+
+# Promote the best completed winner and write retrain artifacts
+python3 run_experiment_matrix.py --summarize-only --promote-winner
+
+# Promote and retrain the best winner on full data
+python3 run_experiment_matrix.py --summarize-only --promote-winner --retrain-best
+```
+
+See `EXPERIMENT_MATRIX.md` for the full comparison plan and promotion criteria.
+Completed runs also produce `experiment_stability.md` for fold-by-fold consistency review.
 
 ### Backtesting
 

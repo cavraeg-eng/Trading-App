@@ -160,8 +160,25 @@ class BacktestEngine:
         Returns:
             Backtest result
         """
+        metadata_path = model_path.with_name(f"{model_path.stem}_metadata.json")
+        feature_columns: Optional[List[str]] = None
+
+        if metadata_path.exists():
+            strategy = RLStrategy(symbols=["BACKTEST"], model_path=model_path)
+            self.feature_engineer = strategy.feature_engineer
+            feature_columns = strategy.feature_columns
+            window_size = strategy.window_size
+        else:
+            strategy = None
+
         # Prepare features
         featured_df = self.feature_engineer.create_features(df)
+
+        if self.feature_engineer.scaler is not None:
+            featured_df = self.feature_engineer.transform_features(
+                featured_df,
+                feature_columns or self.feature_engineer.feature_names,
+            )
         
         # Create environment
         env = TradingEnvironment(
@@ -170,11 +187,13 @@ class BacktestEngine:
             window_size=window_size,
             commission=self.commission,
             slippage=self.slippage,
+            feature_columns=feature_columns or self.feature_engineer.feature_names,
         )
         
         # Load agent
-        agent = RLAgent()
-        agent.load(model_path, env=env)
+        agent = strategy.agent if strategy is not None and strategy.agent is not None else RLAgent()
+        if strategy is None or strategy.agent is None:
+            agent.load(model_path, env=env)
         
         # Run backtest
         obs, _ = env.reset()
@@ -191,7 +210,7 @@ class BacktestEngine:
         # Create equity curve series
         equity_curve = pd.Series(
             env.equity_curve,
-            index=df.index[-len(env.equity_curve):]
+            index=featured_df.index[-len(env.equity_curve):]
         )
         
         # Create trades dataframe
@@ -201,8 +220,8 @@ class BacktestEngine:
                 "trade_id": i,
                 "entry_price": trade.get("price", 0),
                 "exit_price": trade.get("exit_price", 0),
-                "pnl": trade.get("pnl", 0),
-                "return": trade.get("pnl", 0) / self.initial_capital,
+                "pnl": trade.get("realized_pnl", trade.get("pnl", 0)),
+                "return": trade.get("realized_pnl", trade.get("pnl", 0)) / self.initial_capital,
             })
         
         trades_df = pd.DataFrame(trades_data)

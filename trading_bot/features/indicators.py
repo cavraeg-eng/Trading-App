@@ -202,8 +202,8 @@ class TechnicalIndicators:
         
         # Pivot points
         df["pivot"] = (df["high"] + df["low"] + df["close"]) / 3
-        df["pivot_high"] = df["high"].rolling(window=lookback, center=True).max()
-        df["pivot_low"] = df["low"].rolling(window=lookback, center=True).min()
+        df["pivot_high"] = df["high"].rolling(window=lookback).max().shift(1)
+        df["pivot_low"] = df["low"].rolling(window=lookback).min().shift(1)
         
         # Fibonacci retracement levels
         high = df["high"].rolling(window=lookback).max()

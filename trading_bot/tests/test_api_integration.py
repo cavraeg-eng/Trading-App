@@ -132,6 +132,231 @@ class TestBrokerTruthfulness:
         connected = [b for b in brokers if b["connected"]]
         assert len(connected) == 0, "No brokers should be connected by default"
 
+    def test_orders_endpoint_returns_real_orders_shape(self):
+        from datetime import datetime
+        from fastapi.testclient import TestClient
+
+        from trading_bot.api.server import app
+        from trading_bot.execution.broker_base import BaseBroker, BrokerBalance, BrokerOrder, BrokerPosition, OrderSide, OrderStatus, OrderType
+        from trading_bot.execution.broker_manager import broker_manager
+
+        class FakeBroker(BaseBroker):
+            def __init__(self):
+                super().__init__("fake", "Fake Broker", "fake")
+                self.connected = True
+                self._environment = "paper"
+
+            async def connect(self, credentials):
+                return True
+
+            async def disconnect(self):
+                return True
+
+            async def place_order(self, symbol, side, quantity, order_type=OrderType.MARKET, price=None):
+                return BrokerOrder(order_id="new-1", symbol=symbol, side=side, order_type=order_type, quantity=quantity, broker_id=self.broker_id)
+
+            async def cancel_order(self, order_id):
+                return True
+
+            async def get_positions(self):
+                return [BrokerPosition(symbol="EUR/USD", side="long", quantity=1, entry_price=1.1, current_price=1.2, unrealized_pnl=0.1, broker_id=self.broker_id)]
+
+            async def get_balance(self):
+                return BrokerBalance(total_equity=1000, available_margin=900, used_margin=100)
+
+            async def get_order_status(self, order_id):
+                return BrokerOrder(order_id=order_id, symbol="EUR/USD", side=OrderSide.BUY, order_type=OrderType.MARKET, quantity=1, broker_id=self.broker_id)
+
+            async def get_orders(self, count=50, symbol=None, status=None):
+                orders = [
+                    BrokerOrder(
+                        order_id="ord-1",
+                        symbol="EUR/USD",
+                        side=OrderSide.BUY,
+                        order_type=OrderType.MARKET,
+                        quantity=1,
+                        price=1.10001,
+                        status=OrderStatus.FILLED,
+                        filled_quantity=1,
+                        avg_fill_price=1.10002,
+                        created_at=datetime.utcnow(),
+                        updated_at=datetime.utcnow(),
+                        broker_id=self.broker_id,
+                    ),
+                    BrokerOrder(
+                        order_id="ord-2",
+                        symbol="XAU/USD",
+                        side=OrderSide.SELL,
+                        order_type=OrderType.LIMIT,
+                        quantity=2,
+                        price=3200.5,
+                        status=OrderStatus.OPEN,
+                        filled_quantity=0,
+                        avg_fill_price=0,
+                        created_at=datetime.utcnow(),
+                        updated_at=datetime.utcnow(),
+                        broker_id=self.broker_id,
+                    ),
+                ]
+                if symbol:
+                    orders = [order for order in orders if order.symbol == symbol]
+                if status:
+                    orders = [order for order in orders if order.status.value == status]
+                return orders[:count]
+
+        original_brokers = broker_manager._brokers.copy()
+        original_active = broker_manager._active_broker
+        broker_manager._brokers["fake"] = FakeBroker()
+        broker_manager._active_broker = "fake"
+        try:
+            client = TestClient(app)
+            response = client.get("/api/broker/orders?broker_id=fake&count=5")
+            assert response.status_code == 200
+            payload = response.json()
+            assert len(payload) == 2
+            assert payload[0]["status"] == "filled"
+            assert payload[0]["order_id"] == "ord-1"
+            assert payload[0]["broker_id"] == "fake"
+            assert "created_at" in payload[0]
+            filtered = client.get("/api/broker/orders?broker_id=fake&status=filled&symbol=EUR/USD")
+            assert filtered.status_code == 200
+            filtered_payload = filtered.json()
+            assert len(filtered_payload) == 1
+            assert filtered_payload[0]["symbol"] == "EUR/USD"
+
+            active = client.get("/api/broker/active")
+            assert active.status_code == 200
+            active_payload = active.json()
+            assert active_payload["id"] == "fake"
+            assert active_payload["environment"] == "paper"
+        finally:
+            broker_manager._brokers = original_brokers
+            broker_manager._active_broker = original_active
+
+    def test_positions_endpoint_returns_individual_positions_and_close_uses_position_id(self):
+        from fastapi.testclient import TestClient
+
+        from trading_bot.api.server import app
+        from trading_bot.execution.broker_base import BaseBroker, BrokerBalance, BrokerOrder, BrokerPosition, OrderSide, OrderType
+        from trading_bot.execution.broker_manager import broker_manager
+
+        class FakeBroker(BaseBroker):
+            def __init__(self):
+                super().__init__("fake", "Fake Broker", "fake")
+                self.connected = True
+                self._environment = "paper"
+                self.closed_calls = []
+
+            async def connect(self, credentials):
+                return True
+
+            async def disconnect(self):
+                return True
+
+            async def place_order(self, symbol, side, quantity, order_type=OrderType.MARKET, price=None):
+                return BrokerOrder(
+                    order_id="new-1",
+                    symbol=symbol,
+                    side=side,
+                    order_type=order_type,
+                    quantity=quantity,
+                    broker_id=self.broker_id,
+                )
+
+            async def cancel_order(self, order_id):
+                return True
+
+            async def get_positions(self):
+                return [
+                    BrokerPosition(
+                        symbol="EUR/USD",
+                        side="long",
+                        quantity=3,
+                        entry_price=1.17812,
+                        current_price=1.17778,
+                        unrealized_pnl=-0.0010,
+                        broker_id=self.broker_id,
+                        position_id="101",
+                        opened_at="2026-04-16T10:40:00Z",
+                    ),
+                    BrokerPosition(
+                        symbol="EUR/USD",
+                        side="long",
+                        quantity=4,
+                        entry_price=1.17845,
+                        current_price=1.17778,
+                        unrealized_pnl=-0.0019,
+                        broker_id=self.broker_id,
+                        position_id="102",
+                        opened_at="2026-04-16T10:47:43Z",
+                    ),
+                ]
+
+            async def get_balance(self):
+                return BrokerBalance(total_equity=1000, available_margin=900, used_margin=100)
+
+            async def get_order_status(self, order_id):
+                return BrokerOrder(
+                    order_id=order_id,
+                    symbol="EUR/USD",
+                    side=OrderSide.BUY,
+                    order_type=OrderType.MARKET,
+                    quantity=1,
+                    broker_id=self.broker_id,
+                )
+
+            async def close_position(self, symbol, position_id=None):
+                self.closed_calls.append({"symbol": symbol, "position_id": position_id})
+                return True
+
+        original_brokers = broker_manager._brokers.copy()
+        original_active = broker_manager._active_broker
+        fake_broker = FakeBroker()
+        broker_manager._brokers["fake"] = fake_broker
+        broker_manager._active_broker = "fake"
+        try:
+            client = TestClient(app)
+
+            response = client.get("/api/broker/positions?broker_id=fake&symbol=EUR/USD")
+            assert response.status_code == 200
+            payload = response.json()
+            assert len(payload) == 2
+            assert payload[0]["symbol"] == "EUR/USD"
+            assert payload[0]["position_id"] == "101"
+            assert payload[0]["opened_at"] == "2026-04-16T10:40:00Z"
+            assert payload[1]["position_id"] == "102"
+
+            close_response = client.post("/api/broker/close-position/fake?symbol=EUR/USD&position_id=102")
+            assert close_response.status_code == 200
+            assert close_response.json()["success"] is True
+            assert fake_broker.closed_calls == [{"symbol": "EUR/USD", "position_id": "102"}]
+        finally:
+            broker_manager._brokers = original_brokers
+            broker_manager._active_broker = original_active
+
+    def test_restore_state_clears_invalid_persisted_broker(self):
+        import asyncio
+
+        from trading_bot.execution.broker_manager import BrokerManager
+        from trading_bot.persistence import repositories as repo
+
+        repo.set_setting("broker:active", "oanda")
+        repo.set_setting(
+            "broker:credentials:oanda",
+            json.dumps({
+                "api_token": "bad",
+                "account_id": "bad",
+                "environment": "practice",
+            }),
+        )
+
+        manager = BrokerManager()
+        asyncio.run(manager.restore_state())
+
+        assert manager.get_active_broker() is None
+        assert repo.get_setting("broker:active") is None
+        assert repo.get_setting("broker:credentials:oanda") is None
+
 
 class TestSignalSourceLabeling:
     def test_signal_response_has_prediction_source(self):

@@ -42,6 +42,10 @@ class BrokerOrder:
     status: OrderStatus = OrderStatus.PENDING
     filled_quantity: float = 0.0
     avg_fill_price: float = 0.0
+    stop_loss: Optional[float] = None
+    take_profit_1: Optional[float] = None
+    take_profit_2: Optional[float] = None
+    take_profit_3: Optional[float] = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
     broker_id: str = ""
@@ -59,6 +63,8 @@ class BrokerPosition:
     unrealized_pnl: float
     realized_pnl: float = 0.0
     broker_id: str = ""
+    position_id: Optional[str] = None
+    opened_at: Optional[str] = None
 
 
 @dataclass
@@ -98,6 +104,10 @@ class BaseBroker(ABC):
         quantity: float,
         order_type: OrderType = OrderType.MARKET,
         price: Optional[float] = None,
+        stop_loss: Optional[float] = None,
+        take_profit_1: Optional[float] = None,
+        take_profit_2: Optional[float] = None,
+        take_profit_3: Optional[float] = None,
     ) -> BrokerOrder:
         """Place an order with the broker."""
         pass
@@ -122,12 +132,73 @@ class BaseBroker(ABC):
         """Get status of a specific order."""
         pass
 
+    async def get_orders(
+        self,
+        count: int = 50,
+        symbol: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> List[BrokerOrder]:
+        """Get recent orders from the broker."""
+        return []
+
+    async def close_position(
+        self,
+        symbol: str,
+        position_id: Optional[str] = None,
+    ) -> bool:
+        """Close an open position for a symbol.
+
+        Default implementation places a market order in the opposite direction.
+        Subclasses may override with broker-specific close mechanics.
+
+        Args:
+            symbol: Trading symbol to close
+            position_id: Optional broker-specific position or trade identifier
+
+        Returns:
+            True if position was closed successfully
+        """
+        positions = await self.get_positions()
+        for pos in positions:
+            if pos.symbol != symbol:
+                continue
+            if position_id and pos.position_id != position_id:
+                continue
+
+            opposite = OrderSide.SELL if pos.side == "long" else OrderSide.BUY
+            await self.place_order(
+                symbol=symbol,
+                side=opposite,
+                quantity=pos.quantity,
+                order_type=OrderType.MARKET,
+            )
+            return True
+        return False
+
+    async def get_trade_history(
+        self,
+        count: int = 50,
+        symbol: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get closed trade history from the broker.
+
+        Subclasses should override this with broker-specific implementations.
+
+        Returns:
+            List of trade history dictionaries
+        """
+        return []
+
     def get_info(self) -> dict:
         """Get broker information."""
-        return {
+        info = {
             "id": self.broker_id,
             "name": self.name,
             "type": self.broker_type,
             "connected": self.connected,
             "supported_markets": self.supported_markets,
         }
+        environment = getattr(self, "_environment", None)
+        if environment:
+            info["environment"] = environment
+        return info

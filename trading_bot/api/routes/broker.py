@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from trading_bot.api.models import BrokerInfo, OrderRequest
 from trading_bot.execution.broker_base import OrderSide, OrderType
-from trading_bot.execution.broker_manager import broker_manager
+from trading_bot.execution.broker_manager import BrokerOperationError, broker_manager
 
 router = APIRouter(prefix="/api/broker", tags=["broker"])
 
@@ -30,6 +30,30 @@ class ConnectResponse(BaseModel):
     broker_id: str
     message: str
     timestamp: str
+
+
+def _serialize_order(order) -> dict:
+    created_at = order.created_at.isoformat() if getattr(order, "created_at", None) else None
+    updated_at = order.updated_at.isoformat() if getattr(order, "updated_at", None) else created_at
+
+    return {
+        "order_id": order.order_id,
+        "symbol": order.symbol,
+        "side": order.side.value,
+        "order_type": order.order_type.value,
+        "quantity": order.quantity,
+        "price": order.price,
+        "status": order.status.value,
+        "filled_quantity": order.filled_quantity,
+        "avg_fill_price": order.avg_fill_price,
+        "stop_loss": getattr(order, "stop_loss", None),
+        "take_profit_1": getattr(order, "take_profit_1", None),
+        "take_profit_2": getattr(order, "take_profit_2", None),
+        "take_profit_3": getattr(order, "take_profit_3", None),
+        "broker_id": order.broker_id,
+        "created_at": created_at,
+        "updated_at": updated_at,
+    }
 
 
 @router.get("/list")
@@ -184,17 +208,21 @@ async def place_order(order: OrderRequest) -> dict:
         )
 
     # Place order
-    broker_order = await broker_manager.place_order(
-        broker_id=order.broker_id,
-        symbol=order.symbol,
-        side=side,
-        quantity=order.quantity,
-        order_type=order_type,
-        price=order.price,
-    )
-
-    if not broker_order:
-        raise HTTPException(status_code=500, detail="Failed to place order")
+    try:
+        broker_order = await broker_manager.place_order(
+            broker_id=order.broker_id,
+            symbol=order.symbol,
+            side=side,
+            quantity=order.quantity,
+            order_type=order_type,
+            price=order.price,
+            stop_loss=order.stop_loss,
+            take_profit_1=order.take_profit_1,
+            take_profit_2=order.take_profit_2,
+            take_profit_3=order.take_profit_3,
+        )
+    except BrokerOperationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
     return {
         "success": True,
@@ -204,7 +232,11 @@ async def place_order(order: OrderRequest) -> dict:
         "side": broker_order.side.value,
         "quantity": broker_order.quantity,
         "price": broker_order.price,
-        "message": f"{order.side.upper()} order placed for {order.quantity} {order.symbol}",
+        "stop_loss": broker_order.stop_loss,
+        "take_profit_1": broker_order.take_profit_1,
+        "take_profit_2": broker_order.take_profit_2,
+        "take_profit_3": broker_order.take_profit_3,
+        "message": f"{broker_order.side.value.upper()} order placed for {broker_order.quantity} {broker_order.symbol}",
         "timestamp": datetime.now().isoformat()
     }
 
@@ -224,16 +256,19 @@ async def get_positions(
             if symbol and pos.symbol != symbol:
                 continue
             positions.append({
+                "position_id": pos.position_id,
                 "symbol": pos.symbol,
                 "broker_id": pos.broker_id,
                 "quantity": pos.quantity,
                 "side": pos.side,
                 "avg_entry": pos.entry_price,
                 "current_price": pos.current_price,
-                "unrealized_pnl": round(pos.unrealized_pnl, 2),
+                "unrealized_pnl": pos.unrealized_pnl,
                 "unrealized_pnl_pct": round(
                     (pos.unrealized_pnl / denom) * 100, 2
                 ) if (denom := pos.entry_price * pos.quantity) > 0 else 0.0,
+                "opened_at": pos.opened_at,
+                "last_updated": datetime.now().isoformat(),
             })
     else:
         # Get positions from all connected brokers
@@ -244,16 +279,19 @@ async def get_positions(
                     if symbol and pos.symbol != symbol:
                         continue
                     positions.append({
+                        "position_id": pos.position_id,
                         "symbol": pos.symbol,
                         "broker_id": pos.broker_id,
                         "quantity": pos.quantity,
                         "side": pos.side,
                         "avg_entry": pos.entry_price,
                         "current_price": pos.current_price,
-                        "unrealized_pnl": round(pos.unrealized_pnl, 2),
+                        "unrealized_pnl": pos.unrealized_pnl,
                         "unrealized_pnl_pct": round(
                             (pos.unrealized_pnl / denom) * 100, 2
                         ) if (denom := pos.entry_price * pos.quantity) > 0 else 0.0,
+                        "opened_at": pos.opened_at,
+                        "last_updated": datetime.now().isoformat(),
                     })
 
     # Return actual positions only — no mock data
@@ -263,17 +301,33 @@ async def get_positions(
 @router.get("/orders")
 async def get_orders(
     broker_id: Optional[str] = Query(None, description="Filter by broker"),
-    status: Optional[str] = Query(None, description="Filter by status: open, filled, cancelled")
+    symbol: Optional[str] = Query(None, description="Filter by symbol"),
+    status: Optional[str] = Query(None, description="Filter by status: pending, open, filled, partially_filled, cancelled, rejected"),
+    count: int = Query(20, description="Number of orders to fetch", ge=1, le=200),
 ) -> List[dict]:
-    """Get order history."""
-    # Return empty list when no persistent order storage is configured
+    """Get recent orders and their statuses."""
     orders = []
 
     if broker_id:
-        # Query from broker if connected
         status_info = broker_manager.get_broker_status(broker_id)
         if status_info["connected"]:
-            pass  # TODO: fetch real orders from broker API
+            broker_orders = await broker_manager.get_orders(
+                broker_id,
+                count=count,
+                symbol=symbol,
+                status=status,
+            )
+            orders.extend(_serialize_order(order) for order in broker_orders)
+    else:
+        for broker_info in broker_manager.list_brokers():
+            if broker_info["connected"]:
+                broker_orders = await broker_manager.get_orders(
+                    broker_info["id"],
+                    count=count,
+                    symbol=symbol,
+                    status=status,
+                )
+                orders.extend(_serialize_order(order) for order in broker_orders)
 
     return orders
 
@@ -334,3 +388,65 @@ async def cancel_order_endpoint(broker_id: str, order_id: str) -> dict:
         }
     else:
         raise HTTPException(status_code=400, detail=f"Failed to cancel order {order_id}")
+
+
+@router.post("/close-position/{broker_id}")
+async def close_position(
+    broker_id: str,
+    symbol: str = Query(..., description="Symbol to close"),
+    position_id: Optional[str] = Query(None, description="Specific trade or position identifier to close"),
+) -> dict:
+    """Close an open position."""
+    status = broker_manager.get_broker_status(broker_id)
+    if not status["exists"]:
+        raise HTTPException(status_code=404, detail=f"Broker '{broker_id}' not found")
+    if not status["connected"]:
+        raise HTTPException(status_code=400, detail=f"Broker '{broker_id}' is not connected")
+
+    success = await broker_manager.close_position(
+        broker_id,
+        symbol,
+        position_id=position_id,
+    )
+    if success:
+        message = (
+            f"Position {position_id} closed for {symbol}"
+            if position_id
+            else f"Position closed for {symbol}"
+        )
+        return {
+            "success": True,
+            "message": message,
+            "timestamp": datetime.now().isoformat()
+        }
+    else:
+        detail = (
+            f"Failed to close position {position_id} for {symbol}"
+            if position_id
+            else f"Failed to close position for {symbol}"
+        )
+        raise HTTPException(status_code=400, detail=detail)
+
+
+@router.get("/trade-history")
+async def get_trade_history(
+    broker_id: Optional[str] = Query(None, description="Filter by broker"),
+    symbol: Optional[str] = Query(None, description="Filter by symbol"),
+    count: int = Query(50, description="Number of trades to fetch", ge=1, le=200),
+) -> List[dict]:
+    """Get closed trade history from broker."""
+    trades: List[dict] = []
+
+    if broker_id:
+        status_info = broker_manager.get_broker_status(broker_id)
+        if status_info["connected"]:
+            trades = await broker_manager.get_trade_history(broker_id, count=count, symbol=symbol)
+    else:
+        for broker_info in broker_manager.list_brokers():
+            if broker_info["connected"]:
+                history = await broker_manager.get_trade_history(
+                    broker_info["id"], count=count, symbol=symbol
+                )
+                trades.extend(history)
+
+    return trades

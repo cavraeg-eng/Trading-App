@@ -1,0 +1,873 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - heading "AI Trading Bot" [level=1] [ref=e8]
+        - paragraph [ref=e9]: EUR/USD Trading Interface
+      - button "Alerts" [ref=e11] [cursor=pointer]:
+        - img [ref=e12]
+        - generic [ref=e67]: "1"
+    - navigation [ref=e15]:
+      - button "Dashboard" [ref=e16] [cursor=pointer]:
+        - img [ref=e17]
+        - generic [ref=e22]: Dashboard
+      - button "Scanner" [ref=e23] [cursor=pointer]:
+        - img [ref=e24]
+        - generic [ref=e29]: Scanner
+      - button "Backtest" [ref=e30] [cursor=pointer]:
+        - img [ref=e31]
+        - generic [ref=e34]: Backtest
+      - button "Live Trading" [active] [ref=e35] [cursor=pointer]:
+        - img [ref=e36]
+        - generic [ref=e38]: Live Trading
+      - button "Automation" [ref=e39] [cursor=pointer]:
+        - img [ref=e40]
+        - generic [ref=e43]: Automation
+      - button "Copy Journal" [ref=e44] [cursor=pointer]:
+        - img [ref=e45]
+        - generic [ref=e47]: Copy Journal
+      - button "Social" [ref=e48] [cursor=pointer]:
+        - img [ref=e49]
+        - generic [ref=e54]: Social
+      - button "Settings" [ref=e55] [cursor=pointer]:
+        - img [ref=e56]
+        - generic [ref=e59]: Settings
+    - generic [ref=e61]:
+      - paragraph [ref=e62]: "API: ● Connected"
+      - paragraph [ref=e63]:
+        - text: "Broker:"
+        - generic [ref=e68]: ● OANDA
+      - paragraph [ref=e64]: v1.0.0
+  - main [ref=e65]:
+    - generic [ref=e69]:
+      - generic [ref=e70]:
+        - generic [ref=e73]:
+          - button "EUR/USD Fiber" [ref=e74] [cursor=pointer]:
+            - generic [ref=e75]:
+              - generic [ref=e76]: EUR/USD
+              - generic [ref=e77]: Fiber
+            - img [ref=e78]
+          - button "Get AI Suggestions" [ref=e80] [cursor=pointer]:
+            - img [ref=e81]
+        - generic [ref=e84]:
+          - generic [ref=e85]:
+            - generic [ref=e86]: Euro / US Dollar
+            - generic [ref=e87]:
+              - img [ref=e88]
+              - text: Ranging
+          - generic [ref=e90]:
+            - generic [ref=e91]: "1.1791"
+            - generic [ref=e92]: "-0.0001 (-0.01%)"
+      - generic [ref=e93]:
+        - generic [ref=e94]:
+          - generic [ref=e95]:
+            - generic [ref=e97]: TradingView Live
+            - generic [ref=e98]: · Real-time market data
+          - generic [ref=e99]:
+            - generic [ref=e100]:
+              - img [ref=e101]
+              - generic [ref=e104]: Timeframe
+              - button "1m" [ref=e105] [cursor=pointer]
+              - button "5m" [ref=e106] [cursor=pointer]
+              - button "15m" [ref=e107] [cursor=pointer]
+              - button "1H" [ref=e108] [cursor=pointer]
+              - button "4H" [ref=e109] [cursor=pointer]
+              - button "1D" [ref=e110] [cursor=pointer]
+            - generic [ref=e112]: Chart type, indicators & drawings available in the widget toolbar
+          - generic [ref=e115]:
+            - iframe [ref=e119]:
+              - generic [ref=f6e2]:
+                - toolbar [ref=f6e6]:
+                  - generic [ref=f6e10]:
+                    - button "1 hour" [ref=f6e13]:
+                      - generic [ref=f6e15]: 1h
+                    - button "Candles" [ref=f6e20]:
+                      - img [ref=f6e22]:
+                        - img [ref=f6e23]
+                    - button "Indicators, metrics, and strategies" [ref=f6e32]:
+                      - img [ref=f6e33]:
+                        - img [ref=f6e34]
+                      - generic [ref=f6e37]: Indicators
+                - 'region "Chart #1" [ref=f6e42]':
+                  - generic [ref=f6e46]:
+                    - generic:
+                      - generic:
+                        - toolbar:
+                          - generic:
+                            - generic [ref=f6e47]:
+                              - generic [ref=f6e48]:
+                                - generic [ref=f6e49]:
+                                  - generic [ref=f6e51]:
+                                    - img [ref=f6e53]
+                                    - img [ref=f6e55]
+                                  - generic [ref=f6e57]: E
+                                - generic [ref=f6e58]: Euro / U.S. Dollar
+                              - generic "Change interval" [ref=f6e59]:
+                                - text: ·
+                                - button "Change interval" [ref=f6e60]: 1h
+                              - generic [ref=f6e61]:
+                                - text: ·
+                                - generic [ref=f6e62]: FXCM
+                            - generic:
+                              - generic:
+                                - button "More":
+                                  - generic:
+                                    - img
+                            - button "Market open · One update every 5 seconds" [ref=f6e64]:
+                              - img [ref=f6e65]:
+                                - img [ref=f6e66]
+                              - img [ref=f6e68]:
+                                - img [ref=f6e69]
+                          - generic [ref=f6e72]:
+                            - generic [ref=f6e73]:
+                              - generic [ref=f6e74]: O
+                              - generic [ref=f6e75]: "1.17871"
+                            - generic [ref=f6e76]:
+                              - generic [ref=f6e77]: H
+                              - generic [ref=f6e78]: "1.17895"
+                            - generic [ref=f6e79]:
+                              - generic [ref=f6e80]: L
+                              - generic [ref=f6e81]: "1.17863"
+                            - generic [ref=f6e82]:
+                              - generic [ref=f6e83]: C
+                              - generic [ref=f6e84]: "1.17876"
+                            - generic [ref=f6e86]: +0.00005 (+0.00%)
+                      - generic:
+                        - button "Hide indicator legend" [ref=f6e87]:
+                          - img [ref=f6e89]
+                        - generic:
+                          - toolbar:
+                            - generic:
+                              - generic "Volume" [ref=f6e92]:
+                                - generic [ref=f6e93]: Vol
+                              - generic:
+                                - generic:
+                                  - button "Hide":
+                                    - generic:
+                                      - img
+                                  - button "Settings":
+                                    - generic:
+                                      - img
+                                  - button "Remove":
+                                    - generic:
+                                      - img
+                                  - button "More":
+                                    - generic:
+                                      - img
+                            - generic "Volume" [ref=f6e97]: 1.34 K
+                    - generic "Chart for FX:EURUSD, 1 hour" [ref=f6e99]
+            - generic:
+              - generic: Bar close · 1H
+              - generic: 21:21
+            - generic:
+              - generic:
+                - generic: BUY · 76%
+                - generic: OPTIMAL ENTRY
+              - generic:
+                - generic: Entry
+                - generic: 1.1787 - 1.1795
+                - generic: SL
+                - generic: "1.1775"
+                - generic: TP1
+                - generic: "1.1808"
+                - generic: TP2
+                - generic: "1.1824"
+                - generic: TP3
+                - generic: "1.1841"
+          - article [ref=e120]:
+            - generic [ref=e121]:
+              - generic [ref=e122]:
+                - generic [ref=e123]: BUY
+                - generic [ref=e124]:
+                  - generic [ref=e125]: EUR/USD
+                  - generic [ref=e126]: "1.1791"
+                  - generic [ref=e127]: "-0.0001 (-0.01%)"
+                - radiogroup "Trade style" [ref=e128]:
+                  - radio "Scalp" [ref=e129] [cursor=pointer]
+                  - radio "Swing" [checked] [ref=e130] [cursor=pointer]
+                - generic [ref=e131]:
+                  - switch "Toggle copy trading" [ref=e132] [cursor=pointer]
+                  - generic [ref=e134]: Auto Copy
+              - generic [ref=e135]:
+                - generic [ref=e136]: Confidence
+                - progressbar [ref=e138]
+                - generic [ref=e139]: 76%
+                - generic [ref=e140]:
+                  - img [ref=e141]
+                  - text: Ranging
+              - generic [ref=e143]:
+                - paragraph [ref=e144]: "\"RSI supportive at 33.3, price bouncing off lower Bollinger Band, price above EMA(20), higher timeframes aligned bullish\""
+                - generic [ref=e145]: Optimal Entry — act now
+              - generic [ref=e149]:
+                - generic [ref=e150]: Live
+                - generic [ref=e152]: Futures · yfinance
+                - generic [ref=e153]: live · 39m
+                - generic [ref=e154]: Updated just now
+                - generic [ref=e155]: · TF 1m
+                - generic [ref=e156]: · Source yfinance
+              - generic [ref=e157]:
+                - generic [ref=e158]:
+                  - generic [ref=e159]:
+                    - img [ref=e161]:
+                      - generic [ref=e164]: "72"
+                      - generic [ref=e165]: Favorable
+                    - generic [ref=e166]:
+                      - generic [ref=e167]: AI Score
+                      - generic [ref=e168]:
+                        - img [ref=e169]
+                        - generic [ref=e172]: Declining (-4.0)
+                  - generic [ref=e173]:
+                    - generic [ref=e175]:
+                      - generic [ref=e176]: Model Confidence
+                      - generic [ref=e177]: "76"
+                    - generic [ref=e181]:
+                      - generic [ref=e182]: Indicator Consensus
+                      - generic [ref=e183]: "75"
+                    - generic [ref=e187]:
+                      - generic [ref=e188]: Market Regime Fit
+                      - generic [ref=e189]: "58"
+                    - generic [ref=e193]:
+                      - generic [ref=e194]: Pattern Strength
+                      - generic [ref=e195]: "84"
+                    - generic [ref=e199]:
+                      - generic [ref=e200]: Sentiment
+                      - generic [ref=e201]: "62"
+                    - generic [ref=e205]:
+                      - generic [ref=e206]: Volume Momentum
+                      - generic [ref=e207]: "50"
+                - generic [ref=e210]:
+                  - generic [ref=e211]:
+                    - generic [ref=e212]: Pattern Recognition
+                    - generic [ref=e213]: Hit rate 79%
+                  - generic [ref=e215]:
+                    - generic [ref=e216]:
+                      - generic [ref=e217]: Resistance Breakout
+                      - generic [ref=e218]: 84%
+                    - generic [ref=e219]: Price is compressing under resistance with improving volume.
+            - generic [ref=e221]:
+              - generic [ref=e222]:
+                - heading "Price Levels" [level=3] [ref=e223]:
+                  - img [ref=e224]
+                  - text: Price Levels
+                - generic [ref=e228]:
+                  - generic [ref=e229]:
+                    - generic [ref=e230]: SL
+                    - generic [ref=e231]: "1.1775"
+                    - generic [ref=e232]: "-16.4 pips"
+                  - generic [ref=e233]:
+                    - generic [ref=e234]: Entry
+                    - generic [ref=e235]: 1.1787 — 1.1795
+                  - generic [ref=e236]:
+                    - generic [ref=e237]: TP1
+                    - generic [ref=e238]: "1.1808"
+                    - generic [ref=e239]: +16.6 pips
+                  - generic [ref=e240]:
+                    - generic [ref=e241]: TP2
+                    - generic [ref=e242]: "1.1824"
+                    - generic [ref=e243]: +33.1 pips
+                  - generic [ref=e244]:
+                    - generic [ref=e245]: TP3
+                    - generic [ref=e246]: "1.1841"
+                    - generic [ref=e247]: +49.6 pips
+                - img "Visual price ladder" [ref=e248]:
+                  - generic [ref=e257]: Now
+              - generic [ref=e258]:
+                - generic [ref=e259]:
+                  - heading "Risk / Reward" [level=3] [ref=e260]:
+                    - img [ref=e261]
+                    - text: Risk / Reward
+                  - generic [ref=e263]: Good (2.0 R:R)
+                - generic [ref=e264]:
+                  - generic [ref=e265]:
+                    - generic [ref=e266]: TP1
+                    - generic [ref=e267]: 1:1.0
+                    - generic [ref=e270]: 16.6 pips
+                  - generic [ref=e271]:
+                    - generic [ref=e272]: TP2
+                    - generic [ref=e273]: 1:2.0
+                    - generic [ref=e276]: 33.1 pips
+                  - generic [ref=e277]:
+                    - generic [ref=e278]: TP3
+                    - generic [ref=e279]: 1:3.0
+                    - generic [ref=e282]: 49.6 pips
+                - generic [ref=e283]:
+                  - heading "Account Risk" [level=4] [ref=e284]
+                  - generic [ref=e285]:
+                    - generic [ref=e286]: 0.64 lots
+                    - generic [ref=e287]: ·
+                    - generic [ref=e288]: $105
+                    - generic [ref=e289]: (1% risk)
+            - generic [ref=e290]:
+              - generic [ref=e291]:
+                - button "Indicators" [ref=e292] [cursor=pointer]:
+                  - img [ref=e293]
+                  - text: Indicators
+                - button "Multi-TF" [ref=e295] [cursor=pointer]:
+                  - img [ref=e296]
+                  - text: Multi-TF
+                - button "Analysis" [ref=e299] [cursor=pointer]:
+                  - img [ref=e300]
+                  - text: Analysis
+                - button "Open Copies" [ref=e302] [cursor=pointer]:
+                  - img [ref=e303]
+                  - text: Open Copies
+              - generic [ref=e307]:
+                - generic [ref=e308]:
+                  - generic [ref=e309]:
+                    - generic [ref=e310]: RSI(14)
+                    - generic [ref=e311]: "33.3"
+                  - generic [ref=e314]:
+                    - generic [ref=e315]: MACD
+                    - generic [ref=e316]: Bearish Cross
+                  - generic [ref=e319]:
+                    - generic [ref=e320]: EMA(20)
+                    - generic [ref=e321]: "1.17909"
+                  - generic [ref=e324]:
+                    - generic [ref=e325]: BB Position
+                    - generic [ref=e326]: Middle
+                  - generic [ref=e329]:
+                    - generic [ref=e330]: Volume
+                    - generic [ref=e331]: Above Avg
+                - generic [ref=e334]:
+                  - generic [ref=e335]: Consensus
+                  - generic [ref=e340]: 3 Bull · 1 Bear · 1 Neutral
+              - generic [ref=e341]:
+                - generic [ref=e342]:
+                  - img [ref=e343]
+                  - generic [ref=e345]: Optimal entry window — act now
+                - generic [ref=e346]:
+                  - generic [ref=e347]:
+                    - generic [ref=e348]:
+                      - text: "Risk:"
+                      - generic [ref=e349]: 1%
+                    - 'slider "Risk percentage: 1%" [ref=e350] [cursor=pointer]': "1"
+                    - generic [ref=e351]: 0.64 lots · $105 risk
+                  - generic [ref=e352]:
+                    - button "Buy EUR/USD" [ref=e353] [cursor=pointer]:
+                      - img [ref=e354]
+                      - text: BUY
+                    - button "Sell EUR/USD" [ref=e357] [cursor=pointer]:
+                      - img [ref=e358]
+                      - text: SELL
+          - generic [ref=e362] [cursor=pointer]:
+            - generic [ref=e363]:
+              - generic [ref=e364]:
+                - img [ref=e365]
+                - generic [ref=e368]:
+                  - generic [ref=e369]:
+                    - generic [ref=e370]: BUY
+                    - generic [ref=e371]: AI Signal
+                  - generic [ref=e372]:
+                    - img [ref=e373]
+                    - generic [ref=e376]: 11:38:39 PM
+              - generic [ref=e377]:
+                - generic [ref=e380]: Optimal Entry
+                - generic [ref=e381]:
+                  - generic [ref=e382]: Confidence
+                  - generic [ref=e383]:
+                    - img [ref=e384]
+                    - generic [ref=e388]: 76%
+                - button [ref=e389]:
+                  - img [ref=e390]
+            - generic [ref=e394]:
+              - generic [ref=e395]: Weak
+              - generic [ref=e396]: Moderate
+              - generic [ref=e397]: Strong
+          - generic [ref=e400]:
+            - generic [ref=e401]:
+              - heading "Watchlist" [level=3] [ref=e402]:
+                - img [ref=e403]
+                - text: Watchlist
+              - paragraph [ref=e406]: Add pairs to your watchlist
+            - generic [ref=e407]:
+              - 'heading "Economic Calendar Next: 8h 51m 20s" [level=3] [ref=e408]':
+                - img [ref=e409]
+                - text: Economic Calendar
+                - generic [ref=e411]: "Next: 8h 51m 20s"
+              - generic [ref=e412]:
+                - generic [ref=e413]:
+                  - generic [ref=e414]: Apr 15
+                  - generic [ref=e415]: FOMC Rate Decision
+                  - generic [ref=e418]: high
+                - generic [ref=e419]:
+                  - generic [ref=e420]: Apr 16
+                  - generic [ref=e421]: US Retail Sales
+                  - generic [ref=e424]: medium
+                - generic [ref=e425]:
+                  - generic [ref=e426]: Apr 20
+                  - generic [ref=e427]: US Unemployment Claims
+                  - generic [ref=e430]: medium
+                - generic [ref=e431]:
+                  - generic [ref=e432]: Apr 22
+                  - generic [ref=e433]: German PMI
+                  - generic [ref=e436]: medium
+                - generic [ref=e437]:
+                  - generic [ref=e438]: Apr 25
+                  - generic [ref=e439]: US GDP
+                  - generic [ref=e442]: high
+                - generic [ref=e443]:
+                  - generic [ref=e444]: Apr 28
+                  - generic [ref=e445]: Eurozone GDP
+                  - generic [ref=e448]: medium
+        - generic [ref=e449]:
+          - generic [ref=e450]:
+            - generic [ref=e451]:
+              - heading "Strategy Catalog" [level=3] [ref=e452]
+              - combobox [ref=e453]:
+                - option "All" [selected]
+                - option "Gold"
+                - option "Forex"
+            - generic [ref=e454]:
+              - generic [ref=e455]:
+                - generic [ref=e456]:
+                  - generic [ref=e457]:
+                    - generic [ref=e458]:
+                      - generic [ref=e459]: Gold Scalp Burst
+                      - generic [ref=e460]: active · live
+                    - paragraph [ref=e461]: Short-term XAU/USD momentum strategy focused on burst moves during active sessions.
+                    - generic [ref=e462]:
+                      - generic [ref=e463]: XAU/USD
+                      - generic [ref=e464]: scalp
+                      - generic [ref=e465]: new_york
+                      - generic [ref=e466]: spot_preferred
+                  - generic [ref=e467]:
+                    - generic [ref=e468]:
+                      - generic [ref=e469]: Win
+                      - generic [ref=e470]: 62%
+                    - generic [ref=e471]:
+                      - generic [ref=e472]: PF
+                      - generic [ref=e473]: "1.48"
+                - generic [ref=e474]:
+                  - button "Configure" [ref=e475] [cursor=pointer]
+                  - button "Activate Paper" [ref=e476] [cursor=pointer]
+                  - button "Activate Live" [ref=e477] [cursor=pointer]
+              - generic [ref=e478]:
+                - generic [ref=e479]:
+                  - generic [ref=e480]:
+                    - generic [ref=e482]: Gold Swing Trend
+                    - paragraph [ref=e483]: Trend-following XAU/USD strategy using higher-timeframe alignment and regime filters.
+                    - generic [ref=e484]:
+                      - generic [ref=e485]: XAU/USD
+                      - generic [ref=e486]: swing
+                      - generic [ref=e487]: london
+                      - generic [ref=e488]: futures_only
+                  - generic [ref=e489]:
+                    - generic [ref=e490]:
+                      - generic [ref=e491]: Win
+                      - generic [ref=e492]: 58%
+                    - generic [ref=e493]:
+                      - generic [ref=e494]: PF
+                      - generic [ref=e495]: "1.74"
+                - generic [ref=e496]:
+                  - button "Configure" [ref=e497] [cursor=pointer]
+                  - button "Activate Paper" [ref=e498] [cursor=pointer]
+                  - button "Activate Live" [ref=e499] [cursor=pointer]
+              - generic [ref=e500]:
+                - generic [ref=e501]:
+                  - generic [ref=e502]:
+                    - generic [ref=e504]: Gold Event Safe
+                    - paragraph [ref=e505]: Reduced-risk XAU/USD profile that avoids high-impact macro windows and weak source conditions.
+                    - generic [ref=e506]:
+                      - generic [ref=e507]: XAU/USD
+                      - generic [ref=e508]: swing
+                      - generic [ref=e509]: london
+                      - generic [ref=e510]: spot_preferred
+                  - generic [ref=e511]:
+                    - generic [ref=e512]:
+                      - generic [ref=e513]: Win
+                      - generic [ref=e514]: 55%
+                    - generic [ref=e515]:
+                      - generic [ref=e516]: PF
+                      - generic [ref=e517]: "1.63"
+                - generic [ref=e518]:
+                  - button "Configure" [ref=e519] [cursor=pointer]
+                  - button "Activate Paper" [ref=e520] [cursor=pointer]
+                  - button "Activate Live" [ref=e521] [cursor=pointer]
+              - generic [ref=e522]:
+                - generic [ref=e523]:
+                  - generic [ref=e524]:
+                    - generic [ref=e526]: Forex Momentum Core
+                    - paragraph [ref=e527]: Core momentum strategy for major FX pairs using RSI/MACD/EMA agreement.
+                    - generic [ref=e528]:
+                      - generic [ref=e529]: EUR/USD
+                      - generic [ref=e530]: swing
+                      - generic [ref=e531]: london
+                      - generic [ref=e532]: futures_only
+                  - generic [ref=e533]:
+                    - generic [ref=e534]:
+                      - generic [ref=e535]: Win
+                      - generic [ref=e536]: 57%
+                    - generic [ref=e537]:
+                      - generic [ref=e538]: PF
+                      - generic [ref=e539]: "1.52"
+                - generic [ref=e540]:
+                  - button "Configure" [ref=e541] [cursor=pointer]
+                  - button "Activate Paper" [ref=e542] [cursor=pointer]
+                  - button "Activate Live" [ref=e543] [cursor=pointer]
+          - generic [ref=e544]:
+            - heading "Automation Center" [level=3] [ref=e545]
+            - generic [ref=e546]:
+              - generic [ref=e547]:
+                - generic [ref=e548]: Strategy
+                - generic [ref=e549]: Gold Scalp Burst
+              - generic [ref=e550]:
+                - generic [ref=e551]: Mode
+                - generic [ref=e552]: live
+              - generic [ref=e553]:
+                - generic [ref=e554]: Allocation
+                - generic [ref=e555]: 3.5%
+              - generic [ref=e556]:
+                - generic [ref=e557]: Max Positions
+                - generic [ref=e558]: "2"
+              - generic [ref=e559]:
+                - generic [ref=e560]: Enabled
+                - generic [ref=e561]: "yes"
+              - generic [ref=e562]:
+                - generic [ref=e563]: Worker
+                - generic [ref=e564]: running
+              - generic [ref=e565]:
+                - generic [ref=e566]: Cooldown
+                - generic [ref=e567]: 180s
+              - generic [ref=e568]:
+                - generic [ref=e569]: Max Exec / Hour
+                - generic [ref=e570]: "1"
+            - generic [ref=e571]:
+              - generic [ref=e572]: Latest Snapshot
+              - generic [ref=e573]:
+                - generic [ref=e574]:
+                  - generic [ref=e575]: Return
+                  - generic [ref=e576]: 0%
+                - generic [ref=e577]:
+                  - generic [ref=e578]: Win Rate
+                  - generic [ref=e579]: 0%
+                - generic [ref=e580]:
+                  - generic [ref=e581]: PF
+                  - generic [ref=e582]: "0"
+                - generic [ref=e583]:
+                  - generic [ref=e584]: Trades
+                  - generic [ref=e585]: "0"
+            - generic [ref=e586]:
+              - generic [ref=e587]:
+                - generic [ref=e588]: Execution History
+                - generic [ref=e589]:
+                  - combobox [ref=e590]:
+                    - option "all actions" [selected]
+                    - option "worker"
+                    - option "analyze"
+                    - option "execute"
+                  - combobox [ref=e591]:
+                    - option "all status" [selected]
+                    - option "success"
+                    - option "skipped"
+                    - option "error"
+                    - option "started"
+                    - option "stopped"
+              - generic [ref=e592]:
+                - generic [ref=e593]:
+                  - generic [ref=e594]:
+                    - generic [ref=e595]: analyze · skipped
+                    - generic [ref=e596]: XAU/USD · 2026-04-15 01:18:17
+                  - generic [ref=e597]: "{\"reason\":\"signal_threshold\",\"signal\":\"hold\",\"confidence\":48}"
+                - generic [ref=e598]:
+                  - generic [ref=e599]:
+                    - generic [ref=e600]: analyze · skipped
+                    - generic [ref=e601]: XAU/USD · 2026-04-15 01:18:10
+                  - generic [ref=e602]: "{\"reason\":\"signal_threshold\",\"signal\":\"hold\",\"confidence\":48}"
+                - generic [ref=e603]:
+                  - generic [ref=e604]:
+                    - generic [ref=e605]: analyze · skipped
+                    - generic [ref=e606]: XAU/USD · 2026-04-15 01:18:03
+                  - generic [ref=e607]: "{\"reason\":\"signal_threshold\",\"signal\":\"hold\",\"confidence\":48}"
+                - generic [ref=e608]:
+                  - generic [ref=e609]:
+                    - generic [ref=e610]: analyze · skipped
+                    - generic [ref=e611]: XAU/USD · 2026-04-15 01:17:57
+                  - generic [ref=e612]: "{\"reason\":\"signal_threshold\",\"signal\":\"hold\",\"confidence\":48}"
+                - generic [ref=e613]:
+                  - generic [ref=e614]:
+                    - generic [ref=e615]: analyze · skipped
+                    - generic [ref=e616]: XAU/USD · 2026-04-15 01:17:50
+                  - generic [ref=e617]: "{\"reason\":\"signal_threshold\",\"signal\":\"hold\",\"confidence\":48}"
+                - generic [ref=e618]:
+                  - generic [ref=e619]:
+                    - generic [ref=e620]: analyze · skipped
+                    - generic [ref=e621]: XAU/USD · 2026-04-15 01:17:44
+                  - generic [ref=e622]: "{\"reason\":\"signal_threshold\",\"signal\":\"hold\",\"confidence\":48}"
+          - generic [ref=e623]:
+            - heading "Top Opportunities" [level=3] [ref=e624]
+            - generic [ref=e625]:
+              - button "EUR/USD buy 79% Futures · yfinance swing · 1h ranging Confidence 76% AI Score 72% Source Score 100% RSI supportive at 33.3, price bouncing off lower Bollinger Band, price above EMA(20), higher timeframes aligned bullish" [ref=e626] [cursor=pointer]:
+                - generic [ref=e627]:
+                  - generic [ref=e628]:
+                    - generic [ref=e629]: EUR/USD
+                    - generic [ref=e630]: buy
+                  - generic [ref=e631]:
+                    - generic [ref=e632]: 79%
+                    - img [ref=e633]
+                - generic [ref=e635]:
+                  - generic [ref=e636]: Futures · yfinance
+                  - generic [ref=e637]: swing · 1h
+                  - generic [ref=e638]: ranging
+                - generic [ref=e639]:
+                  - generic [ref=e640]:
+                    - generic [ref=e641]: Confidence
+                    - generic [ref=e642]: 76%
+                  - generic [ref=e643]:
+                    - generic [ref=e644]: AI Score
+                    - generic [ref=e645]: 72%
+                  - generic [ref=e646]:
+                    - generic [ref=e647]: Source Score
+                    - generic [ref=e648]: 100%
+                - generic [ref=e649]: RSI supportive at 33.3, price bouncing off lower Bollinger Band, price above EMA(20), higher timeframes aligned bullish
+              - button "GBP/USD buy 77% Futures · yfinance swing · 1h ranging Confidence 76% AI Score 67% Source Score 100% RSI supportive at 36.5, price above EMA(20), higher timeframes aligned bullish" [ref=e650] [cursor=pointer]:
+                - generic [ref=e651]:
+                  - generic [ref=e652]:
+                    - generic [ref=e653]: GBP/USD
+                    - generic [ref=e654]: buy
+                  - generic [ref=e655]:
+                    - generic [ref=e656]: 77%
+                    - img [ref=e657]
+                - generic [ref=e659]:
+                  - generic [ref=e660]: Futures · yfinance
+                  - generic [ref=e661]: swing · 1h
+                  - generic [ref=e662]: ranging
+                - generic [ref=e663]:
+                  - generic [ref=e664]:
+                    - generic [ref=e665]: Confidence
+                    - generic [ref=e666]: 76%
+                  - generic [ref=e667]:
+                    - generic [ref=e668]: AI Score
+                    - generic [ref=e669]: 67%
+                  - generic [ref=e670]:
+                    - generic [ref=e671]: Source Score
+                    - generic [ref=e672]: 100%
+                - generic [ref=e673]: RSI supportive at 36.5, price above EMA(20), higher timeframes aligned bullish
+              - button "BTC/USD buy 77% Futures · yfinance swing · 1h ranging Confidence 76% AI Score 65% Source Score 100% RSI supportive at 38.8, price above EMA(20), higher timeframes aligned bullish" [ref=e674] [cursor=pointer]:
+                - generic [ref=e675]:
+                  - generic [ref=e676]:
+                    - generic [ref=e677]: BTC/USD
+                    - generic [ref=e678]: buy
+                  - generic [ref=e679]:
+                    - generic [ref=e680]: 77%
+                    - img [ref=e681]
+                - generic [ref=e683]:
+                  - generic [ref=e684]: Futures · yfinance
+                  - generic [ref=e685]: swing · 1h
+                  - generic [ref=e686]: ranging
+                - generic [ref=e687]:
+                  - generic [ref=e688]:
+                    - generic [ref=e689]: Confidence
+                    - generic [ref=e690]: 76%
+                  - generic [ref=e691]:
+                    - generic [ref=e692]: AI Score
+                    - generic [ref=e693]: 65%
+                  - generic [ref=e694]:
+                    - generic [ref=e695]: Source Score
+                    - generic [ref=e696]: 100%
+                - generic [ref=e697]: RSI supportive at 38.8, price above EMA(20), higher timeframes aligned bullish
+              - button "US500 buy 74% Futures · yfinance swing · 1h trending_up Confidence 78% AI Score 69% Source Score 40% MACD bullish crossover, price above EMA(20), strong volume confirmation, higher timeframes aligned bullish" [ref=e698] [cursor=pointer]:
+                - generic [ref=e699]:
+                  - generic [ref=e700]:
+                    - generic [ref=e701]: US500
+                    - generic [ref=e702]: buy
+                  - generic [ref=e703]:
+                    - generic [ref=e704]: 74%
+                    - img [ref=e705]
+                - generic [ref=e707]:
+                  - generic [ref=e708]: Futures · yfinance
+                  - generic [ref=e709]: swing · 1h
+                  - generic [ref=e710]: trending_up
+                - generic [ref=e711]:
+                  - generic [ref=e712]:
+                    - generic [ref=e713]: Confidence
+                    - generic [ref=e714]: 78%
+                  - generic [ref=e715]:
+                    - generic [ref=e716]: AI Score
+                    - generic [ref=e717]: 69%
+                  - generic [ref=e718]:
+                    - generic [ref=e719]: Source Score
+                    - generic [ref=e720]: 40%
+                - generic [ref=e721]: MACD bullish crossover, price above EMA(20), strong volume confirmation, higher timeframes aligned bullish
+              - button "US100 buy 68% Futures · yfinance swing · 1h trending_up Confidence 66% AI Score 63% Source Score 40% MACD bullish crossover, price above EMA(20), higher timeframes aligned bullish" [ref=e722] [cursor=pointer]:
+                - generic [ref=e723]:
+                  - generic [ref=e724]:
+                    - generic [ref=e725]: US100
+                    - generic [ref=e726]: buy
+                  - generic [ref=e727]:
+                    - generic [ref=e728]: 68%
+                    - img [ref=e729]
+                - generic [ref=e731]:
+                  - generic [ref=e732]: Futures · yfinance
+                  - generic [ref=e733]: swing · 1h
+                  - generic [ref=e734]: trending_up
+                - generic [ref=e735]:
+                  - generic [ref=e736]:
+                    - generic [ref=e737]: Confidence
+                    - generic [ref=e738]: 66%
+                  - generic [ref=e739]:
+                    - generic [ref=e740]: AI Score
+                    - generic [ref=e741]: 63%
+                  - generic [ref=e742]:
+                    - generic [ref=e743]: Source Score
+                    - generic [ref=e744]: 40%
+                - generic [ref=e745]: MACD bullish crossover, price above EMA(20), higher timeframes aligned bullish
+          - generic [ref=e746]:
+            - heading "Pair Heatmap" [level=3] [ref=e748]
+            - button "EUR/USD -0.74%" [ref=e750] [cursor=pointer]:
+              - generic [ref=e751]: EUR/USD
+              - generic [ref=e752]: "-0.74%"
+            - generic [ref=e754]:
+              - generic [ref=e755]: "-2%"
+              - generic [ref=e757]: +2%
+          - generic [ref=e758]:
+            - heading "Sentiment Heatmap" [level=3] [ref=e759]
+            - generic [ref=e760]:
+              - button "USD/CAD Bearish -0.80" [ref=e761] [cursor=pointer]:
+                - generic [ref=e763]: USD/CAD
+                - generic [ref=e764]:
+                  - img [ref=e765]
+                  - generic [ref=e768]: Bearish
+                - generic [ref=e769]: "-0.80"
+              - button "ETH/USD Bullish +0.79" [ref=e770] [cursor=pointer]:
+                - generic [ref=e772]: ETH/USD
+                - generic [ref=e773]:
+                  - img [ref=e774]
+                  - generic [ref=e777]: Bullish
+                - generic [ref=e778]: "+0.79"
+              - button "USD/CHF Bullish +0.59" [ref=e779] [cursor=pointer]:
+                - generic [ref=e781]: USD/CHF
+                - generic [ref=e782]:
+                  - img [ref=e783]
+                  - generic [ref=e786]: Bullish
+                - generic [ref=e787]: "+0.59"
+              - button "AUD/USD Bearish -0.48" [ref=e788] [cursor=pointer]:
+                - generic [ref=e790]: AUD/USD
+                - generic [ref=e791]:
+                  - img [ref=e792]
+                  - generic [ref=e795]: Bearish
+                - generic [ref=e796]: "-0.48"
+              - button "XAU/USD Bullish +0.44" [ref=e797] [cursor=pointer]:
+                - generic [ref=e799]: XAU/USD
+                - generic [ref=e800]:
+                  - img [ref=e801]
+                  - generic [ref=e804]: Bullish
+                - generic [ref=e805]: "+0.44"
+              - button "SPX500 Bullish +0.43" [ref=e806] [cursor=pointer]:
+                - generic [ref=e808]: SPX500
+                - generic [ref=e809]:
+                  - img [ref=e810]
+                  - generic [ref=e813]: Bullish
+                - generic [ref=e814]: "+0.43"
+              - button "USD/JPY Bullish +0.39" [ref=e815] [cursor=pointer]:
+                - generic [ref=e817]: USD/JPY
+                - generic [ref=e818]:
+                  - img [ref=e819]
+                  - generic [ref=e822]: Bullish
+                - generic [ref=e823]: "+0.39"
+              - button "XAG/USD Bearish -0.37" [ref=e824] [cursor=pointer]:
+                - generic [ref=e826]: XAG/USD
+                - generic [ref=e827]:
+                  - img [ref=e828]
+                  - generic [ref=e831]: Bearish
+                - generic [ref=e832]: "-0.37"
+              - button "GBP/USD Bearish -0.29" [ref=e833] [cursor=pointer]:
+                - generic [ref=e835]: GBP/USD
+                - generic [ref=e836]:
+                  - img [ref=e837]
+                  - generic [ref=e840]: Bearish
+                - generic [ref=e841]: "-0.29"
+              - button "EUR/USD Bullish +0.23" [ref=e842] [cursor=pointer]:
+                - generic [ref=e844]: EUR/USD
+                - generic [ref=e845]:
+                  - img [ref=e846]
+                  - generic [ref=e849]: Bullish
+                - generic [ref=e850]: "+0.23"
+              - button "BTC/USD Bearish -0.21" [ref=e851] [cursor=pointer]:
+                - generic [ref=e853]: BTC/USD
+                - generic [ref=e854]:
+                  - img [ref=e855]
+                  - generic [ref=e858]: Bearish
+                - generic [ref=e859]: "-0.21"
+              - button "NZD/USD Neutral -0.05" [ref=e860] [cursor=pointer]:
+                - generic [ref=e862]: NZD/USD
+                - generic [ref=e863]:
+                  - img [ref=e864]
+                  - generic [ref=e865]: Neutral
+                - generic [ref=e866]: "-0.05"
+            - generic [ref=e868]:
+              - generic [ref=e871]: Bullish
+              - generic [ref=e874]: Neutral
+              - generic [ref=e877]: Bearish
+          - generic [ref=e878]:
+            - generic [ref=e879]:
+              - heading "Market Sentiment" [level=3] [ref=e880]:
+                - img [ref=e881]
+                - text: Market Sentiment
+              - generic [ref=e884]: 24 sources
+            - generic [ref=e885]:
+              - img [ref=e887]
+              - generic [ref=e894]:
+                - generic [ref=e895]:
+                  - img [ref=e896]
+                  - text: Bullish
+                - generic [ref=e899]: "Score: +0.23"
+              - generic [ref=e900]:
+                - generic [ref=e901]: "-1.0"
+                - generic [ref=e902]: "0"
+                - generic [ref=e903]: "+1.0"
+            - generic [ref=e904]:
+              - generic [ref=e906]: 24h Trend
+              - img [ref=e907]
+            - generic [ref=e910]:
+              - heading "Latest Headlines" [level=4] [ref=e911]
+              - generic [ref=e912]:
+                - generic [ref=e915]:
+                  - paragraph [ref=e916]: ECB extends QE program citing deflation risks
+                  - generic [ref=e917]:
+                    - generic [ref=e918]: Reuters
+                    - generic [ref=e919]: •
+                    - generic [ref=e920]: just now
+                - generic [ref=e923]:
+                  - paragraph [ref=e924]: ECB signals potential rate adjustment in upcoming meeting
+                  - generic [ref=e925]:
+                    - generic [ref=e926]: ForexLive
+                    - generic [ref=e927]: •
+                    - generic [ref=e928]: just now
+                - generic [ref=e931]:
+                  - paragraph [ref=e932]: Euro gains as EU reaches breakthrough trade agreement
+                  - generic [ref=e933]:
+                    - generic [ref=e934]: Bloomberg
+                    - generic [ref=e935]: •
+                    - generic [ref=e936]: just now
+                - generic [ref=e939]:
+                  - paragraph [ref=e940]: ECB holds rates steady, awaits more economic data
+                  - generic [ref=e941]:
+                    - generic [ref=e942]: Financial Times
+                    - generic [ref=e943]: •
+                    - generic [ref=e944]: just now
+                - generic [ref=e947]:
+                  - paragraph [ref=e948]: European manufacturing PMI shows unexpected expansion
+                  - generic [ref=e949]:
+                    - generic [ref=e950]: Financial Times
+                    - generic [ref=e951]: •
+                    - generic [ref=e952]: just now
+            - generic [ref=e954]: Updated just now
+          - generic [ref=e955]:
+            - heading "Market Stats" [level=3] [ref=e956]
+            - generic [ref=e957]:
+              - generic [ref=e958]:
+                - generic [ref=e959]: 24h High
+                - generic [ref=e960]: "1.1862"
+              - generic [ref=e961]:
+                - generic [ref=e962]: 24h Low
+                - generic [ref=e963]: "1.1720"
+              - generic [ref=e964]:
+                - generic [ref=e965]: Spread
+                - generic [ref=e966]: 0.2 pips
+              - generic [ref=e967]:
+                - generic [ref=e968]: Volume
+                - generic [ref=e969]: 9.6K
+      - generic [ref=e970]:
+        - button "Open MIDAS Gold Scalper Pro" [ref=e971] [cursor=pointer]:
+          - img [ref=e972]
+        - generic [ref=e974]: MIDAS

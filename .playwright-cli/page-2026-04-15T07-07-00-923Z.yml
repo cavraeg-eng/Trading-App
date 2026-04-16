@@ -1,0 +1,151 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - heading "AI Trading Bot" [level=1] [ref=e8]
+        - paragraph [ref=e9]: EUR/USD Trading Interface
+      - button "Alerts" [ref=e11] [cursor=pointer]:
+        - img [ref=e12]
+        - generic [ref=e15]: "1"
+    - navigation [ref=e16]:
+      - button "Dashboard" [ref=e17] [cursor=pointer]:
+        - img [ref=e18]
+        - generic [ref=e23]: Dashboard
+      - button "Scanner" [ref=e24] [cursor=pointer]:
+        - img [ref=e25]
+        - generic [ref=e30]: Scanner
+      - button "Backtest" [ref=e31] [cursor=pointer]:
+        - img [ref=e32]
+        - generic [ref=e35]: Backtest
+      - button "Live Trading" [ref=e36] [cursor=pointer]:
+        - img [ref=e37]
+        - generic [ref=e39]: Live Trading
+      - button "Automation" [ref=e40] [cursor=pointer]:
+        - img [ref=e41]
+        - generic [ref=e44]: Automation
+      - button "Copy Journal" [ref=e45] [cursor=pointer]:
+        - img [ref=e46]
+        - generic [ref=e48]: Copy Journal
+      - button "Social" [ref=e49] [cursor=pointer]:
+        - img [ref=e50]
+        - generic [ref=e55]: Social
+      - button "Settings" [ref=e56] [cursor=pointer]:
+        - img [ref=e57]
+        - generic [ref=e60]: Settings
+    - generic [ref=e62]:
+      - paragraph [ref=e63]: "API: ● Connected"
+      - paragraph [ref=e64]:
+        - text: "Broker:"
+        - generic [ref=e65]: ● OANDA
+      - paragraph [ref=e66]: v1.0.0
+  - main [ref=e67]:
+    - generic [ref=e68]:
+      - generic [ref=e69]:
+        - generic [ref=e72]:
+          - button "EUR/USD Fiber" [ref=e73] [cursor=pointer]:
+            - generic [ref=e74]:
+              - generic [ref=e75]: EUR/USD
+              - generic [ref=e76]: Fiber
+            - img [ref=e77]
+          - button "Get AI Suggestions" [ref=e79] [cursor=pointer]:
+            - img [ref=e80]
+        - generic [ref=e83]:
+          - generic [ref=e84]:
+            - generic [ref=e85]: Euro / US Dollar
+            - generic [ref=e86]:
+              - img [ref=e87]
+              - text: Ranging
+          - generic [ref=e89]:
+            - generic [ref=e90]: "1.1700"
+            - generic [ref=e91]: +0.0000 (+0.00%)
+      - generic [ref=e92]:
+        - generic [ref=e93]:
+          - generic [ref=e94]:
+            - generic [ref=e96]: TradingView Live
+            - generic [ref=e97]: · Real-time market data
+          - generic [ref=e98]:
+            - generic [ref=e99]:
+              - img [ref=e100]
+              - generic [ref=e103]: Timeframe
+              - button "1m" [ref=e104] [cursor=pointer]
+              - button "5m" [ref=e105] [cursor=pointer]
+              - button "15m" [ref=e106] [cursor=pointer]
+              - button "1H" [ref=e107] [cursor=pointer]
+              - button "4H" [ref=e108] [cursor=pointer]
+              - button "1D" [ref=e109] [cursor=pointer]
+            - generic [ref=e111]: Chart type, indicators & drawings available in the widget toolbar
+          - generic [ref=e114]:
+            - generic:
+              - generic: Bar close · 1H
+              - generic: 53:00
+          - article [ref=e116]:
+            - img [ref=e117]
+            - paragraph [ref=e119]: Awaiting market data…
+          - generic [ref=e123]:
+            - generic [ref=e124]:
+              - heading "Watchlist" [level=3] [ref=e125]:
+                - img [ref=e126]
+                - text: Watchlist
+              - paragraph [ref=e129]: Add pairs to your watchlist
+            - generic [ref=e130]:
+              - heading "Economic Calendar" [level=3] [ref=e131]:
+                - img [ref=e132]
+                - text: Economic Calendar
+              - paragraph [ref=e134]: No upcoming events for EUR/USD
+        - generic [ref=e135]:
+          - generic [ref=e137]:
+            - heading "Strategy Catalog" [level=3] [ref=e138]
+            - combobox [ref=e139]:
+              - option "All" [selected]
+              - option "Gold"
+              - option "Forex"
+          - generic [ref=e140]:
+            - heading "Pair Heatmap" [level=3] [ref=e142]
+            - generic [ref=e143]:
+              - button "EUR/USD 0.00%" [ref=e144] [cursor=pointer]:
+                - generic [ref=e145]: EUR/USD
+                - generic [ref=e146]: 0.00%
+              - button "USD/JPY 0.00%" [ref=e148] [cursor=pointer]:
+                - generic [ref=e149]: USD/JPY
+                - generic [ref=e150]: 0.00%
+              - button "GBP/USD 0.00%" [ref=e151] [cursor=pointer]:
+                - generic [ref=e152]: GBP/USD
+                - generic [ref=e153]: 0.00%
+              - button "USD/CHF 0.00%" [ref=e154] [cursor=pointer]:
+                - generic [ref=e155]: USD/CHF
+                - generic [ref=e156]: 0.00%
+              - button "AUD/USD 0.00%" [ref=e157] [cursor=pointer]:
+                - generic [ref=e158]: AUD/USD
+                - generic [ref=e159]: 0.00%
+              - button "USD/CAD 0.00%" [ref=e160] [cursor=pointer]:
+                - generic [ref=e161]: USD/CAD
+                - generic [ref=e162]: 0.00%
+              - button "NZD/USD 0.00%" [ref=e163] [cursor=pointer]:
+                - generic [ref=e164]: NZD/USD
+                - generic [ref=e165]: 0.00%
+            - generic [ref=e166]:
+              - generic [ref=e167]: "-2%"
+              - generic [ref=e169]: +2%
+          - heading "Sentiment Heatmap" [level=3] [ref=e171]
+          - heading "Market Sentiment" [level=3] [ref=e183]:
+            - img [ref=e184]
+            - text: Market Sentiment
+          - generic [ref=e196]:
+            - heading "Market Stats" [level=3] [ref=e197]
+            - generic [ref=e198]:
+              - generic [ref=e199]:
+                - generic [ref=e200]: 24h High
+                - generic [ref=e201]: "1.1770"
+              - generic [ref=e202]:
+                - generic [ref=e203]: 24h Low
+                - generic [ref=e204]: "1.1630"
+              - generic [ref=e205]:
+                - generic [ref=e206]: Spread
+                - generic [ref=e207]: 0.2 pips
+              - generic [ref=e208]:
+                - generic [ref=e209]: Volume
+                - generic [ref=e210]: 7.3K
+      - generic [ref=e211]:
+        - button "Open MIDAS Gold Scalper Pro" [ref=e212] [cursor=pointer]:
+          - img [ref=e213]
+        - generic [ref=e215]: MIDAS

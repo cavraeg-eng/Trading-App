@@ -1,0 +1,39 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - heading "AI Trading Bot" [level=1] [ref=e8]
+        - paragraph [ref=e9]: EUR/USD Trading Interface
+      - button "Alerts" [ref=e11] [cursor=pointer]:
+        - img [ref=e12]
+    - navigation [ref=e15]:
+      - button "Dashboard" [ref=e16] [cursor=pointer]:
+        - img [ref=e17]
+        - generic [ref=e22]: Dashboard
+      - button "Scanner" [ref=e23] [cursor=pointer]:
+        - img [ref=e24]
+        - generic [ref=e29]: Scanner
+      - button "Backtest" [ref=e30] [cursor=pointer]:
+        - img [ref=e31]
+        - generic [ref=e34]: Backtest
+      - button "Live Trading" [ref=e35] [cursor=pointer]:
+        - img [ref=e36]
+        - generic [ref=e38]: Live Trading
+      - button "Automation" [ref=e39] [cursor=pointer]:
+        - img [ref=e40]
+        - generic [ref=e43]: Automation
+      - button "Copy Journal" [ref=e44] [cursor=pointer]:
+        - img [ref=e45]
+        - generic [ref=e47]: Copy Journal
+      - button "Social" [ref=e48] [cursor=pointer]:
+        - img [ref=e49]
+        - generic [ref=e54]: Social
+      - button "Settings" [ref=e55] [cursor=pointer]:
+        - img [ref=e56]
+        - generic [ref=e59]: Settings
+    - generic [ref=e61]:
+      - paragraph [ref=e62]: "API: ● Checking..."
+      - paragraph [ref=e63]: "Broker: Not configured"
+      - paragraph [ref=e64]: v1.0.0
+  - main [ref=e65]:
+    - generic [ref=e66]: Loading...

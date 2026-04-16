@@ -38,6 +38,80 @@ class Settings(BaseSettings):
     binance_testnet: bool = Field(default=True, description="Use Binance testnet")
     
     # ============================================
+    # Market Data Configuration
+    # ============================================
+    gold_api_key: Optional[str] = Field(
+        default=None, 
+        description="GoldAPI.io API key for accurate XAU/USD spot prices (optional)"
+    )
+    use_spot_prices: bool = Field(
+        default=True,
+        description="Use spot price APIs for XAU/USD instead of futures"
+    )
+    coingecko_api_key: Optional[str] = Field(
+        default=None,
+        description="CoinGecko Pro API key for higher rate limits (optional)"
+    )
+    
+    # ── yfinance tuning ──
+    yf_max_concurrent: int = Field(
+        default=2,
+        description="Max concurrent yfinance requests (semaphore limit)"
+    )
+    yf_max_retries: int = Field(
+        default=3,
+        description="Max retry attempts for yfinance requests"
+    )
+    
+    # ── Cache TTLs ──
+    spot_cache_ttl_scalp: int = Field(
+        default=20,
+        description="Spot price cache TTL in seconds for scalp mode"
+    )
+    spot_cache_ttl_swing: int = Field(
+        default=60,
+        description="Spot price cache TTL in seconds for swing mode"
+    )
+    ohlcv_cache_ttl_intraday: int = Field(
+        default=5,
+        description="OHLCV cache TTL in seconds for intraday timeframes"
+    )
+    ohlcv_cache_ttl_daily: int = Field(
+        default=300,
+        description="OHLCV cache TTL in seconds for daily timeframe"
+    )
+    
+    # ── Source policy ──
+    xau_source_policy: str = Field(
+        default="spot_preferred",
+        description="XAU/USD source policy: spot_preferred, futures_only, spot_only"
+    )
+    enable_coingecko_fallback: bool = Field(
+        default=True,
+        description="Enable CoinGecko PAXG as last-resort fallback for gold spot"
+    )
+    coingecko_cooldown_seconds: int = Field(
+        default=180,
+        description="Temporary cooldown after CoinGecko rate-limit or provider failure"
+    )
+    enable_data_health_monitoring: bool = Field(
+        default=True,
+        description="Enable data source health tracking and reporting"
+    )
+    metals_live_enabled: bool = Field(
+        default=False,
+        description="Enable metals.live as a spot gold source"
+    )
+    gold_api_free_enabled: bool = Field(
+        default=True,
+        description="Enable free gold-api.com spot gold source"
+    )
+    swissquote_xau_enabled: bool = Field(
+        default=True,
+        description="Enable Swissquote public XAU/USD quote feed as backup source"
+    )
+    
+    # ============================================
     # Trading Configuration
     # ============================================
     trading_mode: TradingMode = Field(

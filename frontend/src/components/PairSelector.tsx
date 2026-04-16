@@ -105,12 +105,15 @@ export function PairSelector({
     const isDefault = pair.symbol === defaultPairSymbol;
     const isSelected = pair.symbol === selectedPair.symbol;
     return (
-      <button
+      <div
         key={pair.symbol}
-        onClick={() => handleSelectPair(pair)}
-        className={`w-full flex items-center gap-3 px-3 py-2.5 hover:bg-trading-bg transition-colors ${
+        className={`w-full flex items-center gap-3 px-3 py-2.5 hover:bg-trading-bg transition-colors cursor-pointer ${
           isSelected ? 'bg-trading-accent/10 border-l-2 border-trading-accent' : ''
         }`}
+        onClick={() => handleSelectPair(pair)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleSelectPair(pair); }}
+        role="button"
+        tabIndex={0}
       >
         <div className="flex flex-col items-start flex-1 min-w-0">
           <span className="text-sm font-semibold text-trading-text">{pair.symbol}</span>
@@ -131,7 +134,7 @@ export function PairSelector({
             fill={isDefault ? 'currentColor' : 'none'}
           />
         </button>
-      </button>
+      </div>
     );
   };
 

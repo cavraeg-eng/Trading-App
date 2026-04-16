@@ -1,5 +1,6 @@
 """RL-based trading strategy."""
 
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -9,9 +10,17 @@ import pandas as pd
 
 from trading_bot.config import get_logger, ModelType
 from trading_bot.features.engineering import FeatureEngineer
-from trading_bot.models.agent import RLAgent
-from trading_bot.models.environment import TradingEnvironment
 from trading_bot.strategy.base import BaseStrategy, Signal, SignalType
+
+try:
+    from trading_bot.models.agent import RLAgent
+    from trading_bot.models.environment import TradingEnvironment
+except Exception as exc:
+    RLAgent = None
+    TradingEnvironment = None
+    MODEL_DEPENDENCY_ERROR = exc
+else:
+    MODEL_DEPENDENCY_ERROR = None
 
 logger = get_logger(__name__)
 
@@ -50,6 +59,8 @@ class RLStrategy(BaseStrategy):
         self.feature_engineer = FeatureEngineer()
         self.environments: Dict[str, TradingEnvironment] = {}
         self.data_buffers: Dict[str, pd.DataFrame] = {}
+        self.entry_prices: Dict[str, float] = {}
+        self.metadata: Dict = {}
         
         # Load model if provided
         if model_path:
@@ -61,7 +72,45 @@ class RLStrategy(BaseStrategy):
         Args:
             model_path: Path to model file
         """
-        self.agent = RLAgent(model_type=self.model_type)
+        if RLAgent is None:
+            raise RuntimeError(
+                "RL model dependencies are not installed. "
+                "Install gymnasium, torch, stable-baselines3, and optuna."
+            ) from MODEL_DEPENDENCY_ERROR
+
+        metadata_path = model_path.with_name(f"{model_path.stem}_metadata.json")
+        if metadata_path.exists():
+            with metadata_path.open() as file_handle:
+                self.metadata = json.load(file_handle)
+            metadata_model_type = self.metadata.get("model_type")
+            if metadata_model_type:
+                self.model_type = ModelType(metadata_model_type)
+            self.window_size = int(self.metadata.get("window_size", self.window_size))
+            metadata_feature_columns = self.metadata.get("feature_names")
+            if metadata_feature_columns:
+                self.feature_columns = list(metadata_feature_columns)
+
+            preprocessor_name = self.metadata.get("preprocessor_path")
+            if preprocessor_name:
+                preprocessor_path = model_path.with_name(preprocessor_name)
+                if preprocessor_path.exists():
+                    self.feature_engineer.load_preprocessor(preprocessor_path)
+                    if not self.feature_columns:
+                        self.feature_columns = list(self.feature_engineer.feature_names)
+
+        architecture = str(self.metadata.get("architecture", "mlp"))
+        try:
+            from trading_bot.models.agent import resolve_feature_extractor
+
+            extractor_class, extractor_kwargs = resolve_feature_extractor(architecture)
+        except Exception:
+            extractor_class, extractor_kwargs = None, {}
+
+        self.agent = RLAgent(
+            model_type=self.model_type,
+            features_extractor_class=extractor_class,
+            features_extractor_kwargs=extractor_kwargs,
+        )
         self.agent.load(model_path)
         logger.info(f"Model loaded from {model_path}")
     
@@ -74,7 +123,32 @@ class RLStrategy(BaseStrategy):
         Returns:
             DataFrame with features
         """
-        return self.feature_engineer.create_features(df)
+        featured_df = self.feature_engineer.create_features(df)
+
+        if self.feature_columns:
+            for column in self.feature_columns:
+                if column not in featured_df.columns:
+                    featured_df[column] = 0.0
+
+        if self.feature_engineer.scaler is not None:
+            featured_df = self.feature_engineer.transform_features(
+                featured_df,
+                self.feature_columns or self.feature_engineer.feature_names,
+            )
+
+        if self.feature_columns:
+            ordered_columns = ["open", "high", "low", "close", "volume"]
+            remaining_columns = [
+                column for column in featured_df.columns
+                if column not in ordered_columns and column not in self.feature_columns
+            ]
+            featured_df = featured_df[
+                [column for column in ordered_columns if column in featured_df.columns]
+                + list(self.feature_columns)
+                + remaining_columns
+            ]
+
+        return featured_df
     
     def generate_signal(
         self,
@@ -96,34 +170,50 @@ class RLStrategy(BaseStrategy):
         if self.agent is None:
             logger.warning("No model loaded")
             return None
+
+        if TradingEnvironment is None:
+            raise RuntimeError(
+                "Trading environment dependencies are not installed."
+            ) from MODEL_DEPENDENCY_ERROR
         
         if len(data) < self.window_size:
             logger.debug(f"Insufficient data for {symbol}")
             return None
         
+        current_position = self.get_position(symbol)
+        current_price = data["close"].iloc[-1]
+
         # Create or update environment
         if symbol not in self.environments:
             self.environments[symbol] = TradingEnvironment(
                 df=data,
                 window_size=self.window_size,
-                feature_columns=self.feature_columns,
+                feature_columns=self.feature_columns or self.feature_engineer.feature_names,
             )
         
         env = self.environments[symbol]
         env.df = data.reset_index(drop=True)
+        env.feature_columns = self.feature_columns or self.feature_engineer.feature_names
+        env.n_features = len(env.feature_columns)
         
         # Get current observation
         obs, _ = env.reset()
         env.current_step = len(data) - 1
+        if current_position == SignalType.BUY:
+            env.position = 1.0
+            env.position_notional = env.balance
+            env.entry_price = self.entry_prices.get(symbol, current_price)
+        elif current_position == SignalType.SELL:
+            env.position = -1.0
+            env.position_notional = env.balance
+            env.entry_price = self.entry_prices.get(symbol, current_price)
         obs = env._get_observation()
         
         # Get action from model
         action, _ = self.agent.predict(obs, deterministic=True)
-        position_size = action[0]  # -1 to 1
-        
-        # Determine signal type
-        current_price = data["close"].iloc[-1]
-        current_position = self.get_position(symbol)
+        position_size = float(np.clip(action[0], -1.0, 1.0))
+        stop_loss = float(np.clip(action[1], 0.0, 0.1)) if len(action) > 1 else 0.0
+        take_profit = float(np.clip(action[2], 0.0, 0.2)) if len(action) > 2 else 0.0
         
         # Convert position size to signal
         if position_size > 0.3:  # Long threshold
@@ -157,6 +247,8 @@ class RLStrategy(BaseStrategy):
             confidence=confidence,
             metadata={
                 "position_size": float(position_size),
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
                 "model_type": self.model_type.value,
             },
         )
@@ -165,8 +257,10 @@ class RLStrategy(BaseStrategy):
         
         # Update position tracking
         if signal_type == SignalType.CLOSE:
+            self.entry_prices.pop(symbol, None)
             self.set_position(symbol, None)
         else:
+            self.entry_prices[symbol] = current_price
             self.set_position(symbol, signal_type)
         
         logger.info(
@@ -255,6 +349,7 @@ class RLStrategy(BaseStrategy):
         trainer = ModelTrainer(
             model_path=save_path or Path("./models"),
             n_trials=20,
+            window_size=self.window_size,
         )
         
         # Train

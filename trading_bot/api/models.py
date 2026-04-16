@@ -20,6 +20,15 @@ class IndicatorCondition(BaseModel):
     operator: str   # ">", "<", "crosses_above", "crosses_below", "between"
     value: float
     value2: Optional[float] = None  # for "between" operator
+    compare_indicator: Optional[str] = None  # compare against another indicator instead of a numeric threshold
+
+
+class ScannerConditionGroup(BaseModel):
+    """Grouped scanner conditions."""
+    id: str
+    name: Optional[str] = None
+    logic: str = "AND"
+    conditions: List[IndicatorCondition] = []
 
 
 class ScannerConfig(BaseModel):
@@ -27,7 +36,10 @@ class ScannerConfig(BaseModel):
     name: str = "Custom Scanner"
     conditions: List[IndicatorCondition] = []
     logic: str = "AND"  # "AND" or "OR"
+    groups: Optional[List[ScannerConditionGroup]] = None
     pairs: Optional[List[str]] = None  # if None, scan all
+    trade_style: str = "swing"
+    timeframe: str = "1h"
 
 
 class ScanResult(BaseModel):
@@ -37,6 +49,14 @@ class ScanResult(BaseModel):
     score: float
     matching_conditions: List[str] = []
     indicator_values: Dict[str, float] = {}
+    confidence: Optional[float] = None
+    market_regime: Optional[str] = None
+    trade_style: Optional[str] = None
+    timeframe: Optional[str] = None
+    opportunity_score: Optional[float] = None
+    source_score: Optional[float] = None
+    source_metadata: Optional[Dict[str, Any]] = None
+    reason: Optional[str] = None
 
 
 class SignalStatus(str, Enum):
@@ -64,6 +84,7 @@ class SignalBreakdown(BaseModel):
     take_profit1: Optional[float] = None
     take_profit2: Optional[float] = None
     take_profit3: Optional[float] = None
+    source_metadata: Optional[Dict[str, Any]] = None
 
 
 class CandleData(BaseModel):
@@ -102,6 +123,10 @@ class OrderRequest(BaseModel):
     quantity: float
     order_type: str = "market"
     price: Optional[float] = None
+    stop_loss: Optional[float] = None
+    take_profit_1: Optional[float] = None
+    take_profit_2: Optional[float] = None
+    take_profit_3: Optional[float] = None
 
 
 class LeaderboardEntry(BaseModel):

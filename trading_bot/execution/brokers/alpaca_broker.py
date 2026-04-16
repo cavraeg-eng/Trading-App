@@ -112,6 +112,10 @@ class AlpacaBroker(BaseBroker):
         quantity: float,
         order_type: OrderType = OrderType.MARKET,
         price: Optional[float] = None,
+        stop_loss: Optional[float] = None,
+        take_profit_1: Optional[float] = None,
+        take_profit_2: Optional[float] = None,
+        take_profit_3: Optional[float] = None,
     ) -> BrokerOrder:
         """Place an order with Alpaca.
 
@@ -282,6 +286,88 @@ class AlpacaBroker(BaseBroker):
             logger.error(f"Failed to fetch balance from Alpaca: {e}")
             return BrokerBalance(total_equity=0, available_margin=0, used_margin=0)
 
+    def _map_order_type(self, raw_type: str) -> OrderType:
+        normalized = raw_type.lower()
+        if normalized == "market":
+            return OrderType.MARKET
+        if normalized == "limit":
+            return OrderType.LIMIT
+        return OrderType.STOP
+
+    def _parse_timestamp(self, value: Optional[str]) -> datetime:
+        if not value:
+            return datetime.utcnow()
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return datetime.utcnow()
+
+    async def get_orders(
+        self,
+        count: int = 50,
+        symbol: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> List[BrokerOrder]:
+        """Get recent orders from Alpaca."""
+        if not self.connected or not self._client:
+            raise RuntimeError("Not connected to Alpaca")
+
+        try:
+            status_filter = (status or "all").lower()
+            status_param = {
+                "pending": "open",
+                "open": "open",
+                "filled": "closed",
+                "partially_filled": "closed",
+                "cancelled": "closed",
+                "canceled": "closed",
+                "rejected": "closed",
+                "all": "all",
+            }.get(status_filter, "all")
+
+            response = await self._client.get(
+                f"{self._base_url}/orders",
+                params={
+                    "status": status_param,
+                    "limit": str(count),
+                    "direction": "desc",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            orders: List[BrokerOrder] = []
+            for order in data:
+                if symbol and order.get("symbol") != symbol:
+                    continue
+
+                broker_order = BrokerOrder(
+                    order_id=order.get("id", ""),
+                    symbol=order.get("symbol", ""),
+                    side=OrderSide(order.get("side", "buy")),
+                    order_type=self._map_order_type(order.get("type", "market")),
+                    quantity=float(order.get("qty", 0) or 0),
+                    price=float(order.get("limit_price", 0)) if order.get("limit_price") else None,
+                    status=self._map_order_status(order.get("status", "new")),
+                    filled_quantity=float(order.get("filled_qty", 0) or 0),
+                    avg_fill_price=float(order.get("filled_avg_price", 0)) if order.get("filled_avg_price") else 0.0,
+                    created_at=self._parse_timestamp(order.get("created_at")),
+                    updated_at=self._parse_timestamp(order.get("updated_at") or order.get("filled_at") or order.get("submitted_at")),
+                    broker_id=self.broker_id,
+                    metadata=order,
+                )
+                if status_filter not in ("", "all") and broker_order.status.value != status_filter:
+                    continue
+                orders.append(broker_order)
+
+            return orders[:count]
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to fetch orders from Alpaca: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Failed to fetch orders from Alpaca: {e}")
+            return []
+
     async def get_order_status(self, order_id: str) -> BrokerOrder:
         """Get status of a specific order.
 
@@ -305,7 +391,7 @@ class AlpacaBroker(BaseBroker):
                 order_id=order_id,
                 symbol=data.get("symbol", ""),
                 side=OrderSide(data.get("side", "buy")),
-                order_type=OrderType(data.get("type", "market")),
+                order_type=self._map_order_type(data.get("type", "market")),
                 quantity=float(data.get("qty", 0)),
                 price=float(data.get("limit_price", 0)) if data.get("limit_price") else None,
                 status=self._map_order_status(data.get("status", "new")),

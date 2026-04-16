@@ -10,6 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from trading_bot.persistence.db import init_db
+from trading_bot.services.automation_worker import start_worker, stop_worker
 
 # Track start time for uptime calculation
 start_time = time.time()
@@ -25,8 +26,12 @@ async def lifespan(app: FastAPI):
     print("Trading Bot API starting...")
     init_db(_DEFAULT_DB_PATH)
     print(f"SQLite database initialized at {_DEFAULT_DB_PATH.resolve()}")
+    from trading_bot.execution.broker_manager import broker_manager
+    await broker_manager.restore_state()
+    start_worker()
     yield
     # Shutdown
+    await stop_worker()
     print("Trading Bot API shutting down...")
 
 
@@ -65,6 +70,14 @@ from trading_bot.api.routes.backtest_routes import router as backtest_router
 from trading_bot.api.routes.paper_trading import router as paper_trading_router
 from trading_bot.api.routes.copy_trading import router as copy_trading_router
 from trading_bot.api.routes.metrics import router as metrics_router
+from trading_bot.api.routes.ai_score import router as ai_score_router
+from trading_bot.api.routes.alignment import router as alignment_router
+from trading_bot.api.routes.alerts import router as alerts_router
+from trading_bot.api.routes.datasource_health import router as datasource_health_router
+from trading_bot.api.routes.gold_intelligence import router as gold_intelligence_router
+from trading_bot.api.routes.opportunities import router as opportunities_router
+from trading_bot.api.routes.reporting import router as reporting_router
+from trading_bot.api.routes.strategies import router as strategies_router
 
 app.include_router(scanner.router)
 app.include_router(signals.router)
@@ -76,6 +89,14 @@ app.include_router(backtest_router)
 app.include_router(paper_trading_router)
 app.include_router(copy_trading_router)
 app.include_router(metrics_router)
+app.include_router(ai_score_router)
+app.include_router(alignment_router)
+app.include_router(alerts_router)
+app.include_router(datasource_health_router)
+app.include_router(gold_intelligence_router)
+app.include_router(opportunities_router)
+app.include_router(reporting_router)
+app.include_router(strategies_router)
 
 
 @app.get("/api/health")

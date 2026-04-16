@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import {
   TrendingUp,
   TrendingDown,
@@ -12,33 +12,43 @@ import {
   ChevronRight,
   Loader2,
   Copy,
+  CalendarDays,
   X,
+  Minus,
+  Play,
+  XCircle,
 } from 'lucide-react'
-import type { AIScoreData, DetectedPattern, ForexPair, SignalStatus } from '../types'
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import type { AIScoreData, DetectedPattern, ForexPair, SignalStatus, AlignmentData, SignalBacktestResult, SourceMetadata, CopyTradePosition, CopyTradeStats } from '../types'
+import api from '../lib/api'
+import { formatDateTimeWithZone } from '../lib/time'
+import { DataSourceBadge } from './DataSourceBadge'
+import { FreshnessPill } from './FreshnessPill'
+import { DataQualityBanner } from './DataQualityBanner'
 
 /* ────────────────────────────────────────────────────────────
    Copy Trading Types
    ──────────────────────────────────────────────────────────── */
-interface CopiedPosition {
-  copy_trade_id: string
+/* ────────────────────────────────────────────────────────────
+   AI Score API response shape
+   ──────────────────────────────────────────────────────────── */
+interface AIScoreResponse {
   symbol: string
-  direction: string
-  quantity: number
-  entry_price: number
-  current_price: number
-  stop_loss: number
-  take_profit1: number
-  unrealized_pnl: number
-  status: string
-  created_at: number
-  confidence: number
-}
-
-interface CopyStats {
-  total_trades: number
-  open_trades: number
-  win_rate: number
-  total_pnl: number
+  score: number
+  label: string
+  change: number
+  dataSource?: string
+  dataQuality?: string[]
+  freshnessSeconds?: number | null
+  factors: {
+    modelConfidence: number
+    indicatorConsensus: number
+    marketRegimeFit: number
+    patternStrength: number
+    sentimentScore: number
+    volumeMomentum: number
+  }
+  timestamp: string
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -77,15 +87,29 @@ interface AITradingHubProps {
   // Copy trading props
   copyTradingEnabled?: boolean
   onToggleCopyTrading?: (enabled: boolean) => void
-  copiedPositions?: CopiedPosition[]
-  copyStats?: CopyStats | null
+  copiedPositions?: CopyTradePosition[]
+  copyHistory?: CopyTradePosition[]
+  copyStats?: CopyTradeStats | null
+  copyHistorySymbolFilter?: string
+  onCopyHistorySymbolFilterChange?: (value: string) => void
+  copyHistoryDirectionFilter?: 'ALL' | 'BUY' | 'SELL'
+  onCopyHistoryDirectionFilterChange?: (value: 'ALL' | 'BUY' | 'SELL') => void
+  copyHistoryStatusFilter?: string
+  onCopyHistoryStatusFilterChange?: (value: string) => void
+  copyHistoryRangeFilter?: 'all' | '7d' | '30d' | '90d'
+  onCopyHistoryRangeFilterChange?: (value: 'all' | '7d' | '30d' | '90d') => void
   onCopySignal?: () => void
   onCloseCopyTrade?: (copyTradeId: string) => void
   copyTradeLoading?: boolean
+  riskPct: number
+  onRiskPctChange: (riskPct: number) => void
+  copyDisabledReason?: string | null
   dataFreshness?: 'live' | 'delayed' | 'stale'
   lastUpdatedMs?: number
-  quoteSource?: 'live' | 'mock' | 'unknown'
+  quoteSource?: string
   activeTimeframe?: string
+  sourceMetadata?: SourceMetadata | null
+  forceShowTradeControls?: boolean
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -115,7 +139,66 @@ const signalLabel = (s: string) => {
   }
 }
 
+const formatTradeTimestamp = (timestamp?: number | null) => {
+  if (!timestamp) return '—'
+  return formatDateTimeWithZone(timestamp * 1000)
+}
+
+const scoreColor = (v: number) => {
+  if (v >= 80) return { ring: 'stroke-emerald-400', text: 'text-emerald-400', bg: 'bg-emerald-500' }
+  if (v >= 65) return { ring: 'stroke-emerald-500', text: 'text-emerald-500', bg: 'bg-emerald-500' }
+  if (v >= 40) return { ring: 'stroke-amber-400', text: 'text-amber-400', bg: 'bg-amber-400' }
+  return { ring: 'stroke-red-400', text: 'text-red-400', bg: 'bg-red-400' }
+}
+
+const factorColor = (v: number) => {
+  if (v >= 80) return 'bg-emerald-400'
+  if (v >= 65) return 'bg-emerald-500'
+  if (v >= 40) return 'bg-amber-400'
+  return 'bg-red-400'
+}
+
+const FACTOR_LABELS: Record<string, string> = {
+  modelConfidence: 'Model Confidence',
+  indicatorConsensus: 'Indicator Consensus',
+  marketRegimeFit: 'Market Regime Fit',
+  patternStrength: 'Pattern Strength',
+  sentimentScore: 'Sentiment',
+  volumeMomentum: 'Volume Momentum',
+}
+
 type AnalysisTab = 'indicators' | 'multitf' | 'analysis' | 'copyhistory'
+
+/* ────────────────────────────────────────────────────────────
+   Circular Gauge SVG component
+   ──────────────────────────────────────────────────────────── */
+function ScoreGauge({ score, label }: { score: number; label: string }) {
+  const radius = 52
+  const stroke = 8
+  const circumference = 2 * Math.PI * radius
+  const progress = Math.min(100, Math.max(0, score)) / 100
+  const offset = circumference * (1 - progress)
+  const colors = scoreColor(score)
+
+  return (
+    <div className="flex flex-col items-center">
+      <svg width={130} height={130} viewBox="0 0 130 130" className="drop-shadow-lg">
+        <circle cx="65" cy="65" r={radius} fill="none" stroke="currentColor" strokeWidth={stroke} className="text-trading-bg" />
+        <circle
+          cx="65" cy="65" r={radius} fill="none"
+          strokeWidth={stroke} strokeLinecap="round"
+          className={colors.ring}
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          transform="rotate(-90 65 65)"
+          style={{ transition: 'stroke-dashoffset 0.6s ease' }}
+        />
+        <text x="65" y="60" textAnchor="middle" className={`fill-current ${colors.text}`} fontSize="32" fontWeight="800">{score}</text>
+        <text x="65" y="80" textAnchor="middle" className="fill-current text-trading-muted" fontSize="11" fontWeight="600">{label}</text>
+      </svg>
+    </div>
+  )
+}
 
 /* ────────────────────────────────────────────────────────────
    Component
@@ -137,17 +220,96 @@ function AITradingHub({
   copyTradingEnabled,
   onToggleCopyTrading,
   copiedPositions,
+  copyHistory,
   copyStats,
+  copyHistorySymbolFilter = 'all',
+  onCopyHistorySymbolFilterChange,
+  copyHistoryDirectionFilter = 'ALL',
+  onCopyHistoryDirectionFilterChange,
+  copyHistoryStatusFilter = 'all',
+  onCopyHistoryStatusFilterChange,
+  copyHistoryRangeFilter = 'all',
+  onCopyHistoryRangeFilterChange,
   onCopySignal,
   onCloseCopyTrade,
   copyTradeLoading,
+  riskPct,
+  onRiskPctChange,
+  copyDisabledReason,
   dataFreshness = 'stale',
   lastUpdatedMs,
   quoteSource = 'unknown',
   activeTimeframe,
+  sourceMetadata,
+  forceShowTradeControls = false,
 }: AITradingHubProps) {
-  const [riskPct, setRiskPct] = useState(1)
   const [activeTab, setActiveTab] = useState<AnalysisTab>('indicators')
+
+  /* ── AI Score state ── */
+  const [aiScoreData, setAiScoreData] = useState<AIScoreResponse | null>(null)
+  const [aiScoreLoading, setAiScoreLoading] = useState(false)
+  const aiScorePollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  /* ── Alignment state ── */
+  const [alignmentData, setAlignmentData] = useState<AlignmentData | null>(null)
+  const [alignmentLoading, setAlignmentLoading] = useState(false)
+  const alignmentPairRef = useRef<string>('')
+
+  /* ── Backtest state ── */
+  const [backtestResult, setBacktestResult] = useState<SignalBacktestResult | null>(null)
+  const [backtestLoading, setBacktestLoading] = useState(false)
+  const [backtestOpen, setBacktestOpen] = useState(false)
+
+  /* ── Fetch AI Score ── */
+  const fetchScore = useCallback(async () => {
+    try {
+      const data = await api.fetchAIScore(selectedPair.symbol, signalDetails.timeframe, tradeStyle)
+      setAiScoreData(data)
+    } catch { /* silent */ }
+  }, [selectedPair.symbol, signalDetails.timeframe, tradeStyle])
+
+  useEffect(() => {
+    setAiScoreLoading(true)
+    fetchScore().finally(() => setAiScoreLoading(false))
+
+    if (aiScorePollRef.current) clearInterval(aiScorePollRef.current)
+    aiScorePollRef.current = setInterval(fetchScore, 30_000)
+    return () => { if (aiScorePollRef.current) clearInterval(aiScorePollRef.current) }
+  }, [fetchScore])
+
+  /* ── Fetch Alignment when multitf tab selected ── */
+  useEffect(() => {
+    if (activeTab !== 'multitf') return
+    if (alignmentPairRef.current === selectedPair.symbol && alignmentData) return
+
+    setAlignmentLoading(true)
+    api.fetchAlignment(selectedPair.symbol, tradeStyle)
+      .then((d) => { setAlignmentData(d); alignmentPairRef.current = selectedPair.symbol })
+      .catch(() => { /* silent */ })
+      .finally(() => setAlignmentLoading(false))
+  }, [activeTab, selectedPair.symbol, tradeStyle])
+
+  // Reset alignment cache on pair change
+  useEffect(() => { alignmentPairRef.current = '' }, [selectedPair.symbol])
+
+  /* ── Run Backtest ── */
+  const runBacktest = useCallback(async () => {
+    setBacktestLoading(true)
+    setBacktestOpen(true)
+    try {
+      const direction = isBuyish(signalDetails.signal) ? 'BUY' : isSellish(signalDetails.signal) ? 'SELL' : 'BUY'
+      const result = await api.backtestSignal({
+        symbol: selectedPair.symbol,
+        timeframe: signalDetails.timeframe,
+        direction,
+        lookback_days: 90,
+        initial_balance: accountBalance,
+        risk_percent: riskPct,
+      })
+      setBacktestResult(result)
+    } catch { /* silent */ }
+    setBacktestLoading(false)
+  }, [selectedPair.symbol, signalDetails.signal, signalDetails.timeframe, accountBalance, riskPct])
 
   /* ── derived values ── */
   const displayConf = useMemo(
@@ -183,6 +345,36 @@ function AITradingHub({
   const rr1 = riskDist > 0 ? Math.abs(signalDetails.takeProfit1 - entryMid) / riskDist : 1
   const rr2 = signalDetails.riskReward
   const rr3 = riskDist > 0 ? Math.abs(signalDetails.takeProfit3 - entryMid) / riskDist : 3
+  const copyButtonDisabled = Boolean(copyTradeLoading || copyDisabledReason)
+  const copyLifecycleTone = (status: string) => {
+    if (status === 'closed_tp3') return 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+    if (status === 'partial_tp2') return 'bg-blue-500/10 text-blue-300 border-blue-500/30'
+    if (status === 'partial_tp1') return 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+    return 'bg-slate-500/10 text-slate-300 border-slate-500/30'
+  }
+  const formatDuration = (seconds?: number | null) => {
+    if (seconds == null) return '—'
+    if (seconds < 60) return `${Math.round(seconds)}s`
+    if (seconds < 3600) return `${Math.round(seconds / 60)}m`
+    if (seconds < 86400) return `${(seconds / 3600).toFixed(1)}h`
+    return `${(seconds / 86400).toFixed(1)}d`
+  }
+  const closedHistory = useMemo(
+    () => (copyHistory ?? []).filter((trade) => !['open', 'partial_tp1', 'partial_tp2'].includes(trade.status)),
+    [copyHistory],
+  )
+  const exportHref = useMemo(() => {
+    const params = new URLSearchParams()
+    params.set('limit', '200')
+    if (copyHistorySymbolFilter !== 'all') params.set('symbol', copyHistorySymbolFilter)
+    if (copyHistoryDirectionFilter !== 'ALL') params.set('direction', copyHistoryDirectionFilter)
+    if (copyHistoryStatusFilter !== 'all') params.set('status', copyHistoryStatusFilter)
+    const nowSeconds = Math.floor(Date.now() / 1000)
+    if (copyHistoryRangeFilter === '7d') params.set('from_ts', String(nowSeconds - 7 * 24 * 60 * 60))
+    if (copyHistoryRangeFilter === '30d') params.set('from_ts', String(nowSeconds - 30 * 24 * 60 * 60))
+    if (copyHistoryRangeFilter === '90d') params.set('from_ts', String(nowSeconds - 90 * 24 * 60 * 60))
+    return `/api/copy-trading/history/export?${params.toString()}`
+  }, [copyHistoryDirectionFilter, copyHistoryRangeFilter, copyHistoryStatusFilter, copyHistorySymbolFilter])
 
   const rrQuality = useMemo(() => {
     if (rr2 >= 3) return { label: 'Excellent', cls: 'text-emerald-300', bg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' }
@@ -190,6 +382,38 @@ function AITradingHub({
     if (rr2 >= 1) return { label: 'Decent', cls: 'text-yellow-400', bg: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' }
     return { label: 'Poor', cls: 'text-red-400', bg: 'bg-red-500/20 text-red-300 border-red-500/30' }
   }, [rr2])
+
+  const executionWarning = useMemo(() => {
+    if (!sourceMetadata) return null
+    if (sourceMetadata.qualityFlags?.includes('stale_data')) {
+      return 'Execution risk elevated: data is stale.'
+    }
+    if (sourceMetadata.isFallback || sourceMetadata.qualityFlags?.includes('fallback_source')) {
+      return 'Execution caution: fallback source active.'
+    }
+    if (sourceMetadata.qualityFlags?.includes('synthetic_spot')) {
+      return 'Execution note: synthetic spot derived from futures candles.'
+    }
+    return null
+  }, [sourceMetadata])
+
+  const sourceContextLabel = useMemo(() => {
+    if (!sourceMetadata) return null
+    if (tradeStyle === 'scalp') return 'Scalp Mode'
+    if (selectedPair.symbol === 'XAU/USD') return 'Swing Mode'
+    return null
+  }, [selectedPair.symbol, sourceMetadata, tradeStyle])
+
+  const sourceContextDescription = useMemo(() => {
+    if (!sourceMetadata) return null
+    if (tradeStyle === 'scalp') {
+      return 'Scalp uses live spot-adjusted XAU pricing on 1m/5m.'
+    }
+    if (selectedPair.symbol === 'XAU/USD') {
+      return 'Swing uses futures-backed XAU context with 15m quote polling.'
+    }
+    return null
+  }, [selectedPair.symbol, sourceMetadata, tradeStyle])
 
   /* price ladder percentages */
   const allPrices = [signalDetails.stopLoss, entryMid, signalDetails.takeProfit1, signalDetails.takeProfit2, signalDetails.takeProfit3]
@@ -223,7 +447,6 @@ function AITradingHub({
   }, [signalDetails.indicators])
 
   const totalIndicators = bullish + bearish + neutral || 1
-  const aiScore = signalDetails.aiScore
   const topPatterns = signalDetails.patterns ?? []
 
   const freshnessMeta = useMemo(() => {
@@ -245,7 +468,7 @@ function AITradingHub({
   }, [lastUpdatedMs])
 
   /* ── loading state ── */
-  if (!hasValidData) {
+  if (!hasValidData && !forceShowTradeControls) {
     return (
       <article className="bg-trading-card border border-trading-border rounded-xl p-8 text-center">
         <Loader2 className="animate-spin mx-auto mb-3 text-slate-400" size={28} />
@@ -436,6 +659,16 @@ function AITradingHub({
             <span className={`inline-flex h-2.5 w-2.5 rounded-full ${freshnessMeta.dot}`} />
             {freshnessMeta.label}
           </span>
+          {sourceMetadata && (
+            <>
+              <DataSourceBadge
+                sourceType={sourceMetadata.sourceType}
+                sourceName={sourceMetadata.sourceName}
+                contextLabel={sourceContextLabel ?? undefined}
+              />
+              <FreshnessPill freshnessSeconds={sourceMetadata.freshnessSeconds} marketStatus={sourceMetadata.marketStatus} />
+            </>
+          )}
           <span className="text-trading-muted">
             Updated {lastUpdatedLabel}
           </span>
@@ -445,59 +678,120 @@ function AITradingHub({
             </span>
           )}
           <span className="text-trading-muted">
-            · Source {quoteSource}
+            · Source {sourceMetadata?.sourceName ?? quoteSource}
           </span>
         </div>
+        {sourceContextDescription && (
+          <div className="mt-2 text-xs text-trading-muted">
+            {sourceContextDescription}
+          </div>
+        )}
+        {sourceMetadata && <div className="mt-2"><DataQualityBanner qualityFlags={sourceMetadata.qualityFlags} /></div>}
+        {executionWarning && (
+          <div className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-200">
+            {executionWarning}
+          </div>
+        )}
 
-        {(aiScore || topPatterns.length > 0) && (
-          <div className="mt-3 grid grid-cols-1 lg:grid-cols-[minmax(0,220px)_1fr] gap-3">
-            {aiScore && (
-              <div className="rounded-xl border border-trading-border bg-trading-bg/70 px-3 py-3">
+        {/* ── AI Score Hero Display + Patterns ── */}
+        <div className="mt-3 grid grid-cols-1 lg:grid-cols-[minmax(0,320px)_1fr] gap-3">
+          {/* AI Score Gauge + Factors */}
+          <div className="rounded-xl border border-trading-border bg-trading-bg/70 px-4 py-4">
+            {aiScoreLoading && !aiScoreData ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 size={24} className="animate-spin text-slate-500" />
+              </div>
+            ) : aiScoreData ? (
+              <>
+                <div className="flex items-start gap-4">
+                  <ScoreGauge score={aiScoreData.score} label={aiScoreData.label} />
+                  <div className="flex-1 min-w-0 pt-2">
+                    <div className="text-[11px] uppercase tracking-wider text-trading-muted font-semibold">AI Score</div>
+                    {/* Score trend */}
+                    <div className="mt-1 flex items-center gap-1.5">
+                      {aiScoreData.change > 0 ? (
+                        <TrendingUp size={14} className="text-emerald-400" />
+                      ) : aiScoreData.change < 0 ? (
+                        <TrendingDown size={14} className="text-red-400" />
+                      ) : (
+                        <Minus size={14} className="text-slate-400" />
+                      )}
+                      <span className={`text-xs font-semibold ${
+                        (aiScoreData.change ?? 0) > 0 ? 'text-emerald-400' : (aiScoreData.change ?? 0) < 0 ? 'text-red-400' : 'text-slate-400'
+                      }`}>
+                        {(aiScoreData.change ?? 0) > 0 ? 'Improving' : (aiScoreData.change ?? 0) < 0 ? 'Declining' : 'Stable'}
+                        {(aiScoreData.change ?? 0) !== 0 && ` (${(aiScoreData.change ?? 0) > 0 ? '+' : ''}${Number(aiScoreData.change ?? 0).toFixed(1)})`}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                {/* Factor breakdown — 2-column grid */}
+                <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2">
+                  {Object.entries(aiScoreData.factors).map(([key, val]) => (
+                    <div key={key}>
+                      <div className="flex items-center justify-between text-[11px] mb-0.5">
+                        <span className="text-trading-muted truncate">{FACTOR_LABELS[key] ?? key}</span>
+                        <span className="text-trading-text font-semibold ml-1">{Math.round(val)}</span>
+                      </div>
+                      <div className="h-1.5 bg-trading-card rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${factorColor(val)}`}
+                          style={{ width: `${Math.min(100, val)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : signalDetails.aiScore ? (
+              /* Fallback: use aiScore from signalDetails (existing data) */
+              <>
                 <div className="text-[11px] uppercase tracking-wider text-trading-muted font-semibold">AI Score</div>
                 <div className="mt-1 flex items-end gap-2">
-                  <span className="text-2xl font-extrabold text-trading-text">{aiScore.value}</span>
-                  <span className="text-sm font-semibold text-trading-accent">{aiScore.label}</span>
+                  <span className="text-2xl font-extrabold text-trading-text">{signalDetails.aiScore.value}</span>
+                  <span className="text-sm font-semibold text-trading-accent">{signalDetails.aiScore.label}</span>
                 </div>
                 <div className="mt-2 h-2 rounded-full bg-trading-card overflow-hidden">
                   <div
                     className={`h-full rounded-full bg-gradient-to-r ${
-                      aiScore.value >= 75 ? 'from-emerald-500 to-emerald-400' : aiScore.value >= 55 ? 'from-yellow-500 to-yellow-400' : 'from-red-500 to-red-400'
+                      signalDetails.aiScore.value >= 75 ? 'from-emerald-500 to-emerald-400' : signalDetails.aiScore.value >= 55 ? 'from-yellow-500 to-yellow-400' : 'from-red-500 to-red-400'
                     }`}
-                    style={{ width: `${aiScore.value}%` }}
+                    style={{ width: `${signalDetails.aiScore.value}%` }}
                   />
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-trading-muted">
-                  <span>Model {Math.round(aiScore.factors.modelConfidence)}</span>
-                  <span>Consensus {Math.round(aiScore.factors.indicatorConsensus)}</span>
-                  <span>Regime {Math.round(aiScore.factors.marketRegimeFit)}</span>
-                  <span>Pattern {Math.round(aiScore.factors.patternStrength)}</span>
+                  <span>Model {Math.round(signalDetails.aiScore.factors.modelConfidence)}</span>
+                  <span>Consensus {Math.round(signalDetails.aiScore.factors.indicatorConsensus)}</span>
+                  <span>Regime {Math.round(signalDetails.aiScore.factors.marketRegimeFit)}</span>
+                  <span>Pattern {Math.round(signalDetails.aiScore.factors.patternStrength)}</span>
                 </div>
-              </div>
-            )}
-
-            {topPatterns.length > 0 && (
-              <div className="rounded-xl border border-trading-border bg-trading-bg/70 px-3 py-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-[11px] uppercase tracking-wider text-trading-muted font-semibold">Pattern Recognition</div>
-                  {signalDetails.patternAccuracy != null && (
-                    <span className="text-[11px] text-trading-muted">Hit rate {signalDetails.patternAccuracy}%</span>
-                  )}
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {topPatterns.slice(0, 3).map((pattern) => (
-                    <div key={pattern.name} className={`rounded-lg border px-2.5 py-2 min-w-[150px] ${patternBadgeTone(pattern)}`}>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-bold">{pattern.name}</span>
-                        <span className="text-[11px] font-semibold">{pattern.confidence}%</span>
-                      </div>
-                      <div className="mt-1 text-[11px] opacity-80">{pattern.description}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+              </>
+            ) : null}
           </div>
-        )}
+
+          {/* Pattern recognition */}
+          {topPatterns.length > 0 && (
+            <div className="rounded-xl border border-trading-border bg-trading-bg/70 px-3 py-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[11px] uppercase tracking-wider text-trading-muted font-semibold">Pattern Recognition</div>
+                {signalDetails.patternAccuracy != null && (
+                  <span className="text-[11px] text-trading-muted">Hit rate {signalDetails.patternAccuracy}%</span>
+                )}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {topPatterns.slice(0, 3).map((pattern) => (
+                  <div key={pattern.name} className={`rounded-lg border px-2.5 py-2 min-w-[150px] ${patternBadgeTone(pattern)}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold">{pattern.name}</span>
+                      <span className="text-[11px] font-semibold">{pattern.confidence}%</span>
+                    </div>
+                    <div className="mt-1 text-[11px] opacity-80">{pattern.description}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </section>
 
       {/* ────────────────────────────────────────────────
@@ -646,7 +940,12 @@ function AITradingHub({
                           {pos.direction}
                         </span>
                         <span className="text-xs text-trading-text">{pos.symbol}</span>
-                        <span className="text-xs text-trading-muted">{pos.quantity.toFixed(2)}L</span>
+                        <span className="text-xs text-trading-muted">{(pos.remaining_quantity ?? pos.quantity).toFixed(2)}L live</span>
+                        {pos.partial_exit_count ? (
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${copyLifecycleTone(pos.status)}`}>
+                            {pos.partial_exit_count} partial
+                          </span>
+                        ) : null}
                         <span className="flex-1" />
                         <span className={`text-xs font-semibold ${pos.unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                           {pos.unrealized_pnl >= 0 ? '+' : ''}{pos.unrealized_pnl.toFixed(2)}
@@ -664,10 +963,11 @@ function AITradingHub({
                 )}
 
                 {/* Copy signal button */}
-                {onCopySignal && !isExpired && (
+                {onCopySignal && (
                   <button
                     onClick={onCopySignal}
-                    disabled={copyTradeLoading}
+                    disabled={copyButtonDisabled}
+                    title={copyDisabledReason ?? undefined}
                     className="mt-2 w-full py-2 rounded-lg text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/30 transition-all duration-200 disabled:opacity-50 flex items-center justify-center gap-1.5"
                   >
                     {copyTradeLoading ? (
@@ -676,6 +976,9 @@ function AITradingHub({
                       <><Copy size={12} /> Copy This Signal</>
                     )}
                   </button>
+                )}
+                {copyDisabledReason && (
+                  <p className="mt-2 text-[11px] text-amber-300">{copyDisabledReason}</p>
                 )}
               </div>
             )}
@@ -693,7 +996,7 @@ function AITradingHub({
             { key: 'indicators' as AnalysisTab, label: 'Indicators', icon: <BarChart3 size={14} /> },
             { key: 'multitf' as AnalysisTab, label: 'Multi-TF', icon: <Clock size={14} /> },
             { key: 'analysis' as AnalysisTab, label: 'Analysis', icon: <ChevronRight size={14} /> },
-            { key: 'copyhistory' as AnalysisTab, label: 'Copy Trades', icon: <Copy size={14} /> },
+            { key: 'copyhistory' as AnalysisTab, label: 'Open Copies', icon: <Copy size={14} /> },
           ]).map((tab) => (
             <button
               key={tab.key}
@@ -752,10 +1055,79 @@ function AITradingHub({
             </div>
           )}
 
-          {/* ── Multi-TF tab ── */}
+          {/* ── Multi-TF tab (Enhanced) ── */}
           {activeTab === 'multitf' && (
             <div>
-              {multiTimeframe && multiTimeframe.length > 0 ? (
+              {alignmentLoading && !alignmentData ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 size={24} className="animate-spin text-slate-500" />
+                  <span className="ml-2 text-sm text-trading-muted">Loading alignment data…</span>
+                </div>
+              ) : alignmentData ? (
+                <>
+                  {/* Alignment badge + Dominant direction */}
+                  <div className="flex items-center gap-3 flex-wrap mb-4">
+                    <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold border ${
+                      alignmentData.alignmentScore >= 70
+                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                        : alignmentData.alignmentScore >= 50
+                          ? 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30'
+                          : 'bg-red-500/15 text-red-300 border-red-500/30'
+                    }`}>
+                      {alignmentData.alignmentScore}% Aligned
+                    </span>
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-md ${
+                      alignmentData.alignmentScore >= 70 ? 'bg-emerald-500/10 text-emerald-400' : alignmentData.alignmentScore >= 50 ? 'bg-yellow-500/10 text-yellow-400' : 'bg-red-500/10 text-red-400'
+                    }`}>
+                      {alignmentData.strength}
+                    </span>
+                    <span className={`text-sm font-semibold ${
+                      alignmentData.dominantDirection.toLowerCase().includes('bull') ? 'text-emerald-400' : alignmentData.dominantDirection.toLowerCase().includes('bear') ? 'text-red-400' : 'text-slate-400'
+                    }`}>
+                      {alignmentData.dominantDirection}
+                    </span>
+                    <span className="text-xs text-trading-muted ml-auto">{alignmentData.agreeing}/{alignmentData.total} TFs agree</span>
+                  </div>
+
+                  {/* Visual heatmap grid */}
+                  <div className="flex gap-2 flex-wrap">
+                    {alignmentData.timeframes.map((tf) => {
+                      const isAligned = tf.aligned
+                      const dir = tf.direction.toLowerCase()
+                      const isBullish = dir.includes('bull') || dir === 'up'
+                      const isBearish = dir.includes('bear') || dir === 'down'
+                      const cellBg = isAligned
+                        ? 'bg-emerald-500/15 border-emerald-500/30'
+                        : isBearish
+                          ? 'bg-red-500/15 border-red-500/30'
+                          : 'bg-slate-500/10 border-slate-500/30'
+                      const scaleCls = tf.weight >= 0.3 ? 'min-w-[110px] py-3' : 'min-w-[90px] py-2.5'
+
+                      return (
+                        <div key={tf.tf} className={`flex-1 border rounded-lg px-3 text-center ${cellBg} ${scaleCls}`}>
+                          <div className="text-xs font-bold text-trading-muted uppercase">{tf.tf}</div>
+                          <div className="flex justify-center mt-1">
+                            {isBullish ? (
+                              <TrendingUp size={18} className="text-emerald-400" />
+                            ) : isBearish ? (
+                              <TrendingDown size={18} className="text-red-400" />
+                            ) : (
+                              <Minus size={18} className="text-slate-400" />
+                            )}
+                          </div>
+                          <div className={`text-xs font-bold mt-1 ${
+                            isBullish ? 'text-emerald-400' : isBearish ? 'text-red-400' : 'text-slate-400'
+                          }`}>
+                            {tf.confidence}%
+                          </div>
+                          <div className="text-[10px] text-trading-muted mt-0.5">{tf.signal}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              ) : multiTimeframe && multiTimeframe.length > 0 ? (
+                /* Fallback: existing multiTimeframe data */
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {multiTimeframe.map((mtf) => {
                     const tfColor = mtf.signal === 'BUY' ? 'border-emerald-500/30 bg-emerald-500/5' : mtf.signal === 'SELL' ? 'border-red-500/30 bg-red-500/5' : 'border-yellow-500/30 bg-yellow-500/5'
@@ -781,7 +1153,7 @@ function AITradingHub({
             </div>
           )}
 
-          {/* ── Analysis tab ── */}
+          {/* ── Analysis tab (Enhanced with Backtest) ── */}
           {activeTab === 'analysis' && (
             <div className="space-y-4">
               <div className="bg-trading-bg border border-trading-border rounded-lg px-4 py-3">
@@ -848,12 +1220,119 @@ function AITradingHub({
                   </div>
                 </div>
               )}
+
+              {/* ── Backtest This Signal ── */}
+              <div className="border-t border-trading-border pt-4">
+                <button
+                  onClick={runBacktest}
+                  disabled={backtestLoading}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-bold border border-trading-accent/40 text-trading-accent bg-trading-accent/10 hover:bg-trading-accent/20 transition-all duration-200 disabled:opacity-50"
+                >
+                  {backtestLoading ? (
+                    <><Loader2 size={16} className="animate-spin" /> Running Backtest...</>
+                  ) : (
+                    <><Play size={16} /> Backtest This Signal</>
+                  )}
+                </button>
+
+                {/* Backtest Results */}
+                {backtestOpen && backtestResult && (
+                  <div className="mt-4 bg-trading-bg border border-trading-border rounded-xl p-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-bold text-trading-text">Backtest Results</h4>
+                      <button onClick={() => setBacktestOpen(false)} className="text-slate-500 hover:text-trading-text transition-colors">
+                        <XCircle size={18} />
+                      </button>
+                    </div>
+
+                    {/* Stat cards 2x3 */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {[
+                        { label: 'Win Rate', value: `${backtestResult.winRate.toFixed(1)}%`, positive: backtestResult.winRate >= 50 },
+                        { label: 'Profit Factor', value: backtestResult.profitFactor.toFixed(2), positive: backtestResult.profitFactor >= 1 },
+                        { label: 'Sharpe Ratio', value: backtestResult.sharpeRatio.toFixed(2), positive: backtestResult.sharpeRatio >= 1 },
+                        { label: 'Max Drawdown', value: `${backtestResult.maxDrawdown.toFixed(1)}%`, positive: backtestResult.maxDrawdown > -15 },
+                        { label: 'Total Return', value: `${backtestResult.totalReturn >= 0 ? '+' : ''}${backtestResult.totalReturn.toFixed(1)}%`, positive: backtestResult.totalReturn >= 0 },
+                        { label: 'Num Trades', value: String(backtestResult.numTrades), positive: true },
+                      ].map((stat) => (
+                        <div key={stat.label} className="bg-trading-card border border-trading-border rounded-lg px-3 py-2.5 text-center">
+                          <div className="text-[11px] text-trading-muted uppercase tracking-wide">{stat.label}</div>
+                          <div className={`text-lg font-bold mt-0.5 ${stat.positive ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {stat.value}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Mini equity curve */}
+                    {backtestResult.equityCurve.length > 0 && (
+                      <div className="h-40">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={backtestResult.equityCurve} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+                            <defs>
+                              <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                                <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <XAxis dataKey="time" hide />
+                            <YAxis hide domain={['auto', 'auto']} />
+                            <Tooltip
+                              contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '12px' }}
+                              labelStyle={{ color: '#94a3b8' }}
+                              itemStyle={{ color: '#10b981' }}
+                              formatter={(value: number) => [`$${value.toFixed(2)}`, 'Equity']}
+                            />
+                            <Area type="monotone" dataKey="value" stroke="#10b981" fill="url(#eqGrad)" strokeWidth={2} />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+
+                    {/* Signal-specific stats */}
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      <div className="bg-trading-card border border-trading-border rounded-lg px-3 py-2 text-center">
+                        <div className="text-trading-muted">Avg Hold</div>
+                        <div className="text-trading-text font-semibold mt-0.5">{backtestResult.avgHoldingPeriod}</div>
+                      </div>
+                      <div className="bg-trading-card border border-trading-border rounded-lg px-3 py-2 text-center">
+                        <div className="text-trading-muted">Best Trade</div>
+                        <div className="text-emerald-400 font-semibold mt-0.5">+{backtestResult.bestTrade.toFixed(1)}%</div>
+                      </div>
+                      <div className="bg-trading-card border border-trading-border rounded-lg px-3 py-2 text-center">
+                        <div className="text-trading-muted">Worst Trade</div>
+                        <div className="text-red-400 font-semibold mt-0.5">{backtestResult.worstTrade.toFixed(1)}%</div>
+                      </div>
+                    </div>
+                    <div className="bg-trading-card border border-trading-border rounded-lg px-3 py-2 text-center text-xs">
+                      <div className="text-trading-muted">Avg Risk:Reward</div>
+                      <div className="text-trading-text font-semibold mt-0.5">1:{backtestResult.avgRiskReward.toFixed(1)}</div>
+                    </div>
+
+                    {/* Confidence calibration */}
+                    {backtestResult.confidenceCalibration && (
+                      <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg px-4 py-3 flex items-start gap-2">
+                        <Zap size={16} className="text-blue-400 mt-0.5 shrink-0" />
+                        <div className="text-xs text-blue-200 leading-relaxed">
+                          <span className="font-semibold">Confidence Calibration:</span>{' '}
+                          {backtestResult.confidenceCalibration.description}
+                          {backtestResult.confidenceCalibration.profitablePercent > 0 && (
+                            <span className="ml-1 font-bold text-blue-300">
+                              ({backtestResult.confidenceCalibration.profitablePercent.toFixed(0)}% profitable)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
-          {/* ── Copy History tab ── */}
+          {/* ── Copy Monitor tab ── */}
           {activeTab === 'copyhistory' && (
-            <div>
+            <div className="space-y-4">
               {copiedPositions && copiedPositions.length > 0 ? (
                 <div className="space-y-2">
                   {copiedPositions.map((pos) => (
@@ -865,8 +1344,35 @@ function AITradingHub({
                       </span>
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-semibold text-trading-text">{pos.symbol}</div>
-                        <div className="text-xs text-trading-muted">
-                          {pos.quantity.toFixed(2)} lots @ {fmtPrice(pos.entry_price, selectedPair)} · Conf {pos.confidence}%
+                        <div className="text-xs text-trading-muted flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span>{(pos.remaining_quantity ?? pos.quantity).toFixed(2)} / {pos.quantity.toFixed(2)} lots</span>
+                          <span>@ {fmtPrice(pos.entry_price, selectedPair)}</span>
+                          <span>Conf {pos.confidence}%</span>
+                          <span className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold ${copyLifecycleTone(pos.status)}`}>
+                            {pos.status.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          {pos.tp1_hit && (
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 text-[10px] font-semibold border border-emerald-500/20">
+                              TP1 hit
+                            </span>
+                          )}
+                          {pos.tp2_hit && (
+                            <span className="px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-300 text-[10px] font-semibold border border-blue-500/20">
+                              TP2 hit
+                            </span>
+                          )}
+                          {pos.stop_moved_to_breakeven && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 text-[10px] font-semibold border border-amber-500/20">
+                              SL at breakeven
+                            </span>
+                          )}
+                          {pos.trailing_stop_active && (
+                            <span className="px-1.5 py-0.5 rounded bg-fuchsia-500/10 text-fuchsia-300 text-[10px] font-semibold border border-fuchsia-500/20">
+                              Trailing stop
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div className="text-right">
@@ -875,6 +1381,9 @@ function AITradingHub({
                         </div>
                         <div className="text-xs text-trading-muted">
                           {fmtPrice(pos.current_price, selectedPair)}
+                        </div>
+                        <div className="text-[10px] text-trading-muted mt-1">
+                          SL {fmtPrice(pos.stop_loss, selectedPair)}
                         </div>
                       </div>
                       <button
@@ -890,14 +1399,14 @@ function AITradingHub({
               ) : (
                 <div className="text-center py-6">
                   <Copy size={24} className="mx-auto text-slate-600 mb-2" />
-                  <p className="text-sm text-trading-muted">No copied trades yet</p>
+                  <p className="text-sm text-trading-muted">No open copied trades</p>
                   <p className="text-xs text-slate-600 mt-1">Enable copy trading and click "Copy This Signal" to start</p>
                 </div>
               )}
               
-              {/* Stats summary */}
               {copyStats && copyStats.total_trades > 0 && (
-                <div className="mt-3 grid grid-cols-4 gap-2">
+                <>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
                   <div className="bg-trading-bg rounded-lg px-2 py-1.5 text-center">
                     <div className="text-xs text-trading-muted">Total</div>
                     <div className="text-sm font-bold text-trading-text">{copyStats.total_trades}</div>
@@ -911,12 +1420,235 @@ function AITradingHub({
                     <div className="text-sm font-bold text-trading-text">{copyStats.open_trades}</div>
                   </div>
                   <div className="bg-trading-bg rounded-lg px-2 py-1.5 text-center">
-                    <div className="text-xs text-trading-muted">P&L</div>
+                    <div className="text-xs text-trading-muted">Realized P&L</div>
                     <div className={`text-sm font-bold ${copyStats.total_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       ${copyStats.total_pnl.toFixed(0)}
                     </div>
                   </div>
                 </div>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                  <div className="bg-trading-bg rounded-lg px-3 py-2 text-center">
+                    <div className="text-xs text-trading-muted">Open P&L</div>
+                    <div className={`text-sm font-bold ${copyStats.total_unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {copyStats.total_unrealized_pnl >= 0 ? '+' : ''}${copyStats.total_unrealized_pnl.toFixed(2)}
+                    </div>
+                  </div>
+                  <div className="bg-trading-bg rounded-lg px-3 py-2 text-center">
+                    <div className="text-xs text-trading-muted">Expectancy</div>
+                    <div className={`text-sm font-bold ${copyStats.expectancy >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {copyStats.expectancy >= 0 ? '+' : ''}${copyStats.expectancy.toFixed(2)}
+                    </div>
+                  </div>
+                  <div className="bg-trading-bg rounded-lg px-3 py-2 text-center">
+                    <div className="text-xs text-trading-muted">Profit Factor</div>
+                    <div className="text-sm font-bold text-trading-text">
+                      {copyStats.profit_factor != null ? copyStats.profit_factor.toFixed(2) : '∞'}
+                    </div>
+                  </div>
+                  <div className="bg-trading-bg rounded-lg px-3 py-2 text-center">
+                    <div className="text-xs text-trading-muted">Avg Hold</div>
+                    <div className="text-sm font-bold text-trading-text">
+                      {formatDuration(copyStats.avg_hold_seconds)}
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-trading-bg rounded-lg px-3 py-2 text-center">
+                    <div className="text-xs text-trading-muted">Best</div>
+                    <div className="text-sm font-bold text-emerald-400">
+                      +${copyStats.best_trade.toFixed(2)}
+                    </div>
+                  </div>
+                  <div className="bg-trading-bg rounded-lg px-3 py-2 text-center">
+                    <div className="text-xs text-trading-muted">Worst</div>
+                    <div className="text-sm font-bold text-red-400">
+                      ${copyStats.worst_trade.toFixed(2)}
+                    </div>
+                  </div>
+                  <div className="bg-trading-bg rounded-lg px-3 py-2 text-center">
+                    <div className="text-xs text-trading-muted">Max DD</div>
+                    <div className="text-sm font-bold text-trading-text">
+                      ${copyStats.max_drawdown.toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-trading-bg rounded-lg px-3 py-2 text-center">
+                    <div className="text-xs text-trading-muted">Avg R</div>
+                    <div className="text-sm font-bold text-trading-text">
+                      {copyStats.avg_r_multiple != null ? `${copyStats.avg_r_multiple.toFixed(2)}R` : '—'}
+                    </div>
+                  </div>
+                  <div className="bg-trading-bg rounded-lg px-3 py-2 text-center">
+                    <div className="text-xs text-trading-muted">Loss Streak</div>
+                    <div className="text-sm font-bold text-trading-text">
+                      {copyStats.current_loss_streak} / {copyStats.max_loss_streak}
+                    </div>
+                  </div>
+                  <div className="bg-trading-bg rounded-lg px-3 py-2 text-center">
+                    <div className="text-xs text-trading-muted">Partial exits</div>
+                    <div className="text-sm font-bold text-trading-text">
+                      {copyStats.partial_exit_trades}
+                    </div>
+                  </div>
+                </div>
+
+                {copyStats.equity_curve.length > 0 && (
+                  <div className="bg-trading-bg border border-trading-border rounded-lg px-4 py-3">
+                    <div className="text-xs font-bold text-trading-muted uppercase tracking-wider mb-3">Copy Equity Curve</div>
+                    <div className="h-40">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={copyStats.equity_curve}>
+                          <defs>
+                            <linearGradient id="copyEqGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.35} />
+                              <stop offset="95%" stopColor="#38bdf8" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <XAxis dataKey="symbol" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                          <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                          <Tooltip
+                            contentStyle={{ background: '#0f172a', border: '1px solid #334155', borderRadius: '8px', fontSize: '12px' }}
+                            labelStyle={{ color: '#94a3b8' }}
+                            itemStyle={{ color: '#38bdf8' }}
+                            formatter={(value: number) => [`$${value.toFixed(2)}`, 'Equity']}
+                          />
+                          <Area type="monotone" dataKey="cumulative_pnl" stroke="#38bdf8" fill="url(#copyEqGrad)" strokeWidth={2} />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+
+                {copyStats.symbol_breakdown.length > 0 && (
+                  <div className="bg-trading-bg border border-trading-border rounded-lg px-4 py-3">
+                    <div className="text-xs font-bold text-trading-muted uppercase tracking-wider mb-3">Symbol Breakdown</div>
+                    <div className="space-y-2">
+                      {copyStats.symbol_breakdown.slice(0, 5).map((row) => (
+                        <div key={row.symbol} className="grid grid-cols-[1.2fr_0.9fr_0.9fr_1fr] gap-2 text-xs items-center">
+                          <div className="text-trading-text font-semibold">{row.symbol}</div>
+                          <div className="text-trading-muted">{row.total_trades} trades</div>
+                          <div className="text-trading-muted">{row.win_rate.toFixed(0)}% win</div>
+                          <div className={`font-semibold text-right ${row.total_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {row.total_pnl >= 0 ? '+' : ''}${row.total_pnl.toFixed(2)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid lg:grid-cols-2 gap-3">
+                  <div className="bg-trading-bg border border-trading-border rounded-lg px-4 py-3">
+                    <div className="text-xs font-bold text-trading-muted uppercase tracking-wider mb-3">Recent Closed Trades</div>
+                    {copyStats.recent_closed.length > 0 ? (
+                      <div className="space-y-2">
+                        {copyStats.recent_closed.slice(0, 5).map((trade) => (
+                          <div key={trade.copy_trade_id} className="flex items-center gap-3 text-xs">
+                            <div className="min-w-0 flex-1">
+                              <div className="font-semibold text-trading-text">{trade.symbol}</div>
+                              <div className="text-trading-muted">{trade.status.replace(/_/g, ' ')}</div>
+                            </div>
+                            <div className="text-trading-muted">{formatDuration(trade.holding_seconds)}</div>
+                            <div className={`font-semibold ${trade.realized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {trade.realized_pnl >= 0 ? '+' : ''}${trade.realized_pnl.toFixed(2)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-trading-muted">No closed trades yet</p>
+                    )}
+                  </div>
+
+                  <div className="bg-trading-bg border border-trading-border rounded-lg px-4 py-3">
+                    <div className="text-xs font-bold text-trading-muted uppercase tracking-wider mb-3">Trade History</div>
+                    <div className="flex flex-col sm:flex-row gap-2 mb-3">
+                      <select
+                        value={copyHistorySymbolFilter}
+                        onChange={(event) => onCopyHistorySymbolFilterChange?.(event.target.value)}
+                        className="bg-trading-card border border-trading-border rounded-md px-2 py-1.5 text-xs text-trading-text"
+                      >
+                        <option value="all">All Symbols</option>
+                        {Array.from(new Set((copyHistory ?? []).map((trade) => trade.symbol))).map((symbol) => (
+                          <option key={symbol} value={symbol}>{symbol}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={copyHistoryDirectionFilter}
+                        onChange={(event) => onCopyHistoryDirectionFilterChange?.(event.target.value as 'ALL' | 'BUY' | 'SELL')}
+                        className="bg-trading-card border border-trading-border rounded-md px-2 py-1.5 text-xs text-trading-text"
+                      >
+                        <option value="ALL">All Directions</option>
+                        <option value="BUY">BUY</option>
+                        <option value="SELL">SELL</option>
+                      </select>
+                      <select
+                        value={copyHistoryStatusFilter}
+                        onChange={(event) => onCopyHistoryStatusFilterChange?.(event.target.value)}
+                        className="bg-trading-card border border-trading-border rounded-md px-2 py-1.5 text-xs text-trading-text"
+                      >
+                        <option value="all">All Outcomes</option>
+                        <option value="closed_tp3">TP3</option>
+                        <option value="closed_sl">Stop Loss</option>
+                        <option value="closed_manual">Manual Close</option>
+                      </select>
+                      <div className="inline-flex items-center gap-2 rounded-md border border-trading-border bg-trading-card px-2 py-1.5 text-xs text-trading-text">
+                        <CalendarDays size={12} className="text-trading-muted" />
+                        <select
+                          value={copyHistoryRangeFilter}
+                          onChange={(event) => onCopyHistoryRangeFilterChange?.(event.target.value as 'all' | '7d' | '30d' | '90d')}
+                          className="bg-transparent text-xs text-trading-text outline-none"
+                        >
+                          <option value="all">All Time</option>
+                          <option value="7d">Last 7d</option>
+                          <option value="30d">Last 30d</option>
+                          <option value="90d">Last 90d</option>
+                        </select>
+                      </div>
+                      <a
+                        href={exportHref}
+                        className="inline-flex items-center justify-center rounded-md border border-trading-accent/30 px-3 py-1.5 text-xs font-semibold text-trading-accent hover:bg-trading-accent/10 transition-colors"
+                      >
+                        Export CSV
+                      </a>
+                    </div>
+                    {closedHistory.length > 0 ? (
+                      <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                        {closedHistory.slice(0, 12).map((trade) => (
+                          <div key={trade.copy_trade_id} className="flex items-center gap-3 text-xs">
+                            <span className={`px-1.5 py-0.5 rounded border font-semibold ${copyLifecycleTone(trade.status)}`}>
+                              {trade.status.replace(/_/g, ' ')}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="font-semibold text-trading-text">{trade.symbol}</div>
+                              <div className="text-trading-muted">
+                                {trade.direction} · {formatDuration(trade.holding_seconds)} · {trade.partial_exit_count ?? 0} partials
+                              </div>
+                              <div className="text-[10px] text-trading-muted/80">
+                                Opened: {formatTradeTimestamp(trade.created_at)}
+                              </div>
+                              <div className="text-[10px] text-trading-muted/80">
+                                Closed: {formatTradeTimestamp(trade.closed_at)}
+                              </div>
+                            </div>
+                            <div className="text-trading-muted min-w-[52px] text-right">
+                              {trade.realized_pnl !== 0 && trade.initial_stop_loss != null
+                                ? `${(((trade.realized_pnl) / (Math.abs(trade.entry_price - trade.initial_stop_loss) * trade.quantity)) || 0).toFixed(2)}R`
+                                : '—'}
+                            </div>
+                            <div className={`font-semibold ${trade.realized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {trade.realized_pnl >= 0 ? '+' : ''}${trade.realized_pnl.toFixed(2)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-trading-muted">History will appear once copy trades close.</p>
+                    )}
+                  </div>
+                </div>
+                </>
               )}
             </div>
           )}
@@ -957,7 +1689,7 @@ function AITradingHub({
                 max="5"
                 step="0.5"
                 value={riskPct}
-                onChange={(e) => setRiskPct(parseFloat(e.target.value))}
+                onChange={(e) => onRiskPctChange(parseFloat(e.target.value))}
                 className="flex-1 h-2 min-w-[80px] accent-trading-accent cursor-pointer"
                 aria-label={`Risk percentage: ${riskPct}%`}
               />

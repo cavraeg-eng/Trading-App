@@ -4,34 +4,29 @@
 **Referenced Files in This Document**
 - [main.py](file://trading_bot/main.py)
 - [server.py](file://trading_bot/api/server.py)
-- [market.py](file://trading_bot/api/routes/market.py)
-- [broker_manager.py](file://trading_bot/execution/broker_manager.py)
-- [settings.py](file://trading_bot/config/settings.py)
-- [App.tsx](file://frontend/src/App.tsx)
-- [Dashboard.tsx](file://frontend/src/pages/Dashboard.tsx)
-- [TradingChart.tsx](file://frontend/src/components/TradingChart.tsx)
-- [EconomicCalendar.tsx](file://frontend/src/components/EconomicCalendar.tsx)
-- [SentimentPanel.tsx](file://frontend/src/components/SentimentPanel.tsx)
-- [analyzer.py](file://trading_bot/sentiment/analyzer.py)
-- [engine.py](file://trading_bot/backtest/engine.py)
-- [indicators.py](file://trading_bot/features/indicators.py)
-- [engineering.py](file://trading_bot/features/engineering.py)
-- [base.py](file://trading_bot/strategy/base.py)
+- [copy_trading.py](file://trading_bot/api/routes/copy_trading.py)
+- [db.py](file://trading_bot/persistence/db.py)
+- [repositories.py](file://trading_bot/persistence/repositories.py)
 - [rl_strategy.py](file://trading_bot/strategy/rl_strategy.py)
-- [paper.py](file://trading_bot/execution/paper.py)
-- [live.py](file://trading_bot/execution/live.py)
-- [alerts.py](file://trading_bot/monitoring/alerts.py)
+- [base.py](file://trading_bot/strategy/base.py)
+- [train.py](file://trading_bot/models/train.py)
+- [storage.py](file://trading_bot/data/storage.py)
 - [dashboard.py](file://trading_bot/monitoring/dashboard.py)
+- [Social.tsx](file://frontend/src/pages/Social.tsx)
+- [AITradingHub.tsx](file://frontend/src/components/AITradingHub.tsx)
+- [LeaderboardTable.tsx](file://frontend/src/components/LeaderboardTable.tsx)
+- [AIRecommendations.tsx](file://frontend/src/components/AIRecommendations.tsx)
+- [PairHeatmap.tsx](file://frontend/src/components/PairHeatmap.tsx)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive React frontend architecture with real-time trading interface
-- Integrated FastAPI backend with RESTful endpoints for market data and sentiment analysis
-- Implemented multi-broker execution system with CCXT, OANDA, and Alpaca integrations
-- Enhanced visualization components including TradingView widget integration and economic calendar
-- Added advanced sentiment analysis with market sentiment panels and real-time updates
-- Expanded real-time market data processing with caching and mock fallback mechanisms
+- Enhanced AI-powered trading capabilities with comprehensive RL strategy implementation
+- Added comprehensive copy trading functionality with SQLite persistence and real-time position management
+- Integrated advanced social trading features including leaderboards, signal sharing, and community engagement
+- Expanded market data integration with Parquet storage and SQLite caching systems
+- Implemented advanced monitoring dashboard with performance analytics and real-time metrics
+- Added comprehensive training pipeline with hyperparameter optimization and walk-forward validation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -45,426 +40,425 @@
 9. [Conclusion](#conclusion)
 
 ## Introduction
-This document explains the AI Trading Bot's comprehensive platform featuring a modern React frontend, FastAPI backend, multi-broker execution system, and advanced visualization components. The system integrates real-time market data processing, AI-powered trading recommendations, economic calendar integration, sentiment analysis, and sophisticated risk management. It provides both paper trading simulation and live trading capabilities with comprehensive monitoring and alerts.
+This document explains the AI Trading Bot's comprehensive platform featuring advanced AI-powered trading capabilities, comprehensive copy trading functionality, and sophisticated social trading features. The system integrates reinforcement learning models with LSTM/Transformer extractors, real-time market data processing, advanced risk management, and extensive monitoring capabilities. It provides both paper trading simulation and live trading with comprehensive social features including leaderboards, signal sharing, and community engagement.
 
 ## Project Structure
-The system is built with a modern full-stack architecture featuring separate frontend and backend components:
+The system is built with a modern full-stack architecture featuring separate frontend and backend components with advanced AI and trading capabilities:
 
 **Backend Architecture:**
-- FastAPI server with RESTful endpoints for market data, sentiment analysis, and trading operations
-- Multi-broker execution system supporting CCXT, OANDA, and Alpaca exchanges
-- Real-time market data processing with caching and mock fallback mechanisms
-- Advanced sentiment analysis engine with keyword-based scoring
-- Comprehensive risk management and monitoring systems
+- FastAPI server with comprehensive RESTful endpoints for market data, copy trading, social features, and trading operations
+- Reinforcement Learning strategy with PPO/SAC models and LSTM/Transformer extractors
+- Multi-broker execution system with CCXT, OANDA, and Alpaca integrations
+- Advanced persistence layer with SQLite for copy trading, paper trading, and signal tracking
+- Real-time market data processing with Parquet storage and SQLite caching
+- Comprehensive monitoring dashboard with performance analytics
 
 **Frontend Architecture:**
 - React-based trading interface with TypeScript and Tailwind CSS
-- Real-time charting with TradingView widget integration
-- Interactive economic calendar with countdown timers
-- Market sentiment panels with visual gauges and trend analysis
-- Responsive dashboard with pair selection and watchlist management
+- AI Trading Hub with comprehensive signal analysis and copy trading integration
+- Social trading features including leaderboards, signal sharing, and community engagement
+- Advanced visualization components with pair heatmaps and interactive charts
+- Real-time performance monitoring and trading analytics
 
 ```mermaid
 graph TB
-FRONTEND["React Frontend<br/>frontend/src/App.tsx"]
-DASHBOARD["Dashboard<br/>frontend/src/pages/Dashboard.tsx"]
-CHART["TradingChart<br/>frontend/src/components/TradingChart.tsx"]
-ECON["EconomicCalendar<br/>frontend/src/components/EconomicCalendar.tsx"]
-SENTIMENT["SentimentPanel<br/>frontend/src/components/SentimentPanel.tsx"]
+FRONTEND["React Frontend<br/>frontend/src/pages/Social.tsx"]
+AITRADING["AITradingHub<br/>frontend/src/components/AITradingHub.tsx"]
+LEADERBOARD["LeaderboardTable<br/>frontend/src/components/LeaderboardTable.tsx"]
+AI_RECS["AIRecommendations<br/>frontend/src/components/AIRecommendations.tsx"]
+PAIRMAP["PairHeatmap<br/>frontend/src/components/PairHeatmap.tsx"]
 BACKEND["FastAPI Backend<br/>trading_bot/api/server.py"]
-MARKET["Market Routes<br/>trading_bot/api/routes/market.py"]
-BROKER["Broker Manager<br/>trading_bot/execution/broker_manager.py"]
-SENTIMENT_BACKEND["Sentiment Analyzer<br/>trading_bot/sentiment/analyzer.py"]
-CONFIG["Settings<br/>trading_bot/config/settings.py"]
-DATA["Market Data<br/>yfinance integration"]
-REDIS["Redis Cache<br/>real-time data caching"]
-FRONTEND --> BACKEND
-DASHBOARD --> CHART
-DASHBOARD --> ECON
-DASHBOARD --> SENTIMENT
-BACKEND --> MARKET
-BACKEND --> BROKER
-BACKEND --> SENTIMENT_BACKEND
-MARKET --> DATA
-MARKET --> REDIS
-BROKER --> CONFIG
-SENTIMENT_BACKEND --> CONFIG
+COPY_TRADING["Copy Trading API<br/>trading_bot/api/routes/copy_trading.py"]
+RL_STRATEGY["RL Strategy<br/>trading_bot/strategy/rl_strategy.py"]
+TRAINING["Model Training<br/>trading_bot/models/train.py"]
+STORAGE["Data Storage<br/>trading_bot/data/storage.py"]
+DB["SQLite Database<br/>trading_bot/persistence/db.py"]
+DASHBOARD["Monitoring Dashboard<br/>trading_bot/monitoring/dashboard.py"]
+MAIN["CLI Main<br/>trading_bot/main.py"]
+FRONTEND --> AITRADING
+FRONTEND --> LEADERBOARD
+FRONTEND --> AI_RECS
+FRONTEND --> PAIRMAP
+BACKEND --> COPY_TRADING
+BACKEND --> RL_STRATEGY
+BACKEND --> TRAINING
+BACKEND --> STORAGE
+BACKEND --> DB
+BACKEND --> DASHBOARD
+RL_STRATEGY --> TRAINING
+TRAINING --> STORAGE
+COPY_TRADING --> DB
+MAIN --> BACKEND
+MAIN --> RL_STRATEGY
 ```
 
 **Diagram sources**
-- [App.tsx:1-176](file://frontend/src/App.tsx#L1-L176)
-- [Dashboard.tsx:1-534](file://frontend/src/pages/Dashboard.tsx#L1-L534)
-- [TradingChart.tsx:1-421](file://frontend/src/components/TradingChart.tsx#L1-L421)
-- [EconomicCalendar.tsx:1-240](file://frontend/src/components/EconomicCalendar.tsx#L1-L240)
-- [SentimentPanel.tsx:1-331](file://frontend/src/components/SentimentPanel.tsx#L1-L331)
-- [server.py:1-87](file://trading_bot/api/server.py#L1-L87)
-- [market.py:1-743](file://trading_bot/api/routes/market.py#L1-L743)
-- [broker_manager.py:1-299](file://trading_bot/execution/broker_manager.py#L1-L299)
-- [analyzer.py:1-458](file://trading_bot/sentiment/analyzer.py#L1-L458)
+- [Social.tsx:1-467](file://frontend/src/pages/Social.tsx#L1-L467)
+- [AITradingHub.tsx:1-800](file://frontend/src/components/AITradingHub.tsx#L1-L800)
+- [LeaderboardTable.tsx:1-228](file://frontend/src/components/LeaderboardTable.tsx#L1-L228)
+- [AIRecommendations.tsx:1-289](file://frontend/src/components/AIRecommendations.tsx#L1-L289)
+- [PairHeatmap.tsx:1-124](file://frontend/src/components/PairHeatmap.tsx#L1-L124)
+- [server.py:1-115](file://trading_bot/api/server.py#L1-L115)
+- [copy_trading.py:1-248](file://trading_bot/api/routes/copy_trading.py#L1-L248)
+- [rl_strategy.py:1-285](file://trading_bot/strategy/rl_strategy.py#L1-L285)
+- [train.py:1-446](file://trading_bot/models/train.py#L1-L446)
+- [storage.py:1-484](file://trading_bot/data/storage.py#L1-L484)
+- [db.py:1-36](file://trading_bot/persistence/db.py#L1-L36)
+- [dashboard.py:1-328](file://trading_bot/monitoring/dashboard.py#L1-L328)
+- [main.py:1-347](file://trading_bot/main.py#L1-L347)
 
 **Section sources**
-- [App.tsx:1-176](file://frontend/src/App.tsx#L1-L176)
-- [server.py:1-87](file://trading_bot/api/server.py#L1-L87)
-- [broker_manager.py:1-299](file://trading_bot/execution/broker_manager.py#L1-L299)
+- [Social.tsx:1-467](file://frontend/src/pages/Social.tsx#L1-L467)
+- [server.py:1-115](file://trading_bot/api/server.py#L1-L115)
+- [copy_trading.py:1-248](file://trading_bot/api/routes/copy_trading.py#L1-L248)
+- [rl_strategy.py:1-285](file://trading_bot/strategy/rl_strategy.py#L1-L285)
+- [train.py:1-446](file://trading_bot/models/train.py#L1-L446)
 
 ## Core Components
 
-### Modern React Frontend with Real-Time Trading Interface
-- **Dashboard Architecture**: Comprehensive trading dashboard with pair selection, watchlist management, and real-time price updates
-- **Interactive Charts**: TradingView widget integration with real-time candle data and signal visualization
-- **Economic Calendar**: Automated event tracking with countdown timers and impact ratings
-- **Sentiment Analysis**: Real-time market sentiment panels with visual gauges and trend analysis
+### Advanced AI Trading Strategy with Reinforcement Learning
+- **RL Strategy Implementation**: PPO and SAC algorithms with LSTM/Transformer extractors for complex market analysis
+- **Feature Engineering Pipeline**: 100+ technical indicators including RSI, MACD, EMA, Bollinger Bands, ATR, and custom indicators
+- **Multi-Timeframe Analysis**: Consensus building across 1D, 4H, 1H, 15M, and 5M timeframes
+- **Risk-Reward Optimization**: Automated stop-loss and take-profit level determination with position sizing
+- **Confidence Scoring**: Percentage-based confidence levels for trade recommendations with threshold filtering
+
+### Comprehensive Copy Trading System
+- **Real-Time Position Management**: Live copy trading with automatic position sizing and risk controls
+- **SQLite Persistence**: Complete copy trading data storage with settings, positions, and history tracking
+- **Risk Management**: Configurable position limits, risk percentages, and concurrent position controls
+- **Performance Analytics**: Win rate tracking, P&L calculations, and statistical reporting
+- **Community Features**: Signal sharing, follower management, and performance leaderboard integration
+
+### Advanced Social Trading Platform
+- **Leaderboard System**: Real-time performance rankings with weekly, monthly, and all-time periods
+- **Signal Sharing**: Community-driven signal sharing with confidence levels and risk parameters
+- **Profile Management**: User statistics, following/unfollowing capabilities, and performance metrics
+- **Trending Analysis**: Market sentiment tracking and popular symbol identification
+- **Integration Points**: Seamless integration between AI recommendations and social features
+
+### Enhanced Market Data Infrastructure
+- **Multi-Format Storage**: Parquet files for OHLCV data and SQLite for structured trading data
+- **Real-Time Caching**: Intelligent caching with TTL-based expiration for performance optimization
+- **Historical Data Management**: Efficient storage and retrieval of large market datasets
+- **Data Validation**: Robust data quality checks and error handling for reliable market analysis
+- **Backup Systems**: Multiple storage formats ensuring data durability and accessibility
+
+### Advanced Monitoring and Analytics
+- **Performance Dashboard**: Real-time equity curves, drawdown analysis, and statistical metrics
+- **Trade Analytics**: Comprehensive trade distribution, win/loss ratios, and performance breakdowns
+- **Risk Monitoring**: Real-time risk assessment with circuit breaker integration
+- **Alert System**: Comprehensive notification system for trading events and system status
+- **Metrics Tracking**: Persistent storage of performance metrics for historical analysis
+
+### Modern React Frontend Architecture
+- **AI Trading Hub**: Comprehensive trading interface with signal analysis, risk management, and copy trading
+- **Social Features**: Leaderboard integration, signal sharing, and community interaction
+- **Pair Selection**: Advanced pair selection with heatmap visualization and performance tracking
+- **Real-Time Updates**: WebSocket connections for live market data and social feeds
 - **Responsive Design**: Mobile-friendly interface with dark theme trading aesthetics
 
-### FastAPI Backend with RESTful Endpoints
-- **Market Data API**: Comprehensive market analysis with technical indicators and multi-timeframe analysis
-- **Sentiment API**: Real-time sentiment scoring with keyword-based analysis and trend tracking
-- **Trading Operations**: Paper trading and live execution endpoints with order management
-- **Real-time Processing**: Mock data generation for fallback scenarios and caching mechanisms
-
-### Multi-Broker Execution System
-- **CCXT Integration**: Support for Binance, Bybit, OKX, and Kraken with unified API access
-- **OANDA Integration**: Forex market access with professional-grade execution
-- **Alpaca Integration**: US market access with commission-free trading
-- **Unified Broker Management**: Centralized broker connection and order routing
-
-### Advanced Visualization Components
-- **Trading Charts**: Real-time candlestick charts with technical indicator overlays
-- **Signal Visualization**: Interactive markers for entry/exit points and stop-loss targets
-- **Economic Calendar**: Upcoming events with impact ratings and countdown timers
-- **Sentiment Gauges**: Visual sentiment scoring with trend analysis and headline integration
-
-### Real-Time Market Data Processing
-- **yfinance Integration**: Real market data retrieval with automatic fallback to mock data
-- **Caching System**: Intelligent caching with TTL-based expiration for performance optimization
-- **Aggregation Logic**: Candle aggregation for unsupported timeframes
-- **Mock Data Generation**: Realistic synthetic data generation for testing and development
-
-### AI-Powered Trading Recommendations
-- **Technical Analysis**: Multi-indicator analysis with RSI, MACD, EMA, and Bollinger Bands
-- **Multi-Timeframe Analysis**: Consensus building across 1D, 4H, 1H, 15M, and 5M timeframes
-- **Risk-Reward Calculation**: Automated stop-loss and take-profit level determination
-- **Confidence Scoring**: Percentage-based confidence levels for trade recommendations
-
 **Section sources**
-- [Dashboard.tsx:1-534](file://frontend/src/pages/Dashboard.tsx#L1-L534)
-- [TradingChart.tsx:1-421](file://frontend/src/components/TradingChart.tsx#L1-L421)
-- [EconomicCalendar.tsx:1-240](file://frontend/src/components/EconomicCalendar.tsx#L1-L240)
-- [SentimentPanel.tsx:1-331](file://frontend/src/components/SentimentPanel.tsx#L1-L331)
-- [market.py:1-743](file://trading_bot/api/routes/market.py#L1-L743)
-- [broker_manager.py:1-299](file://trading_bot/execution/broker_manager.py#L1-L299)
-- [analyzer.py:1-458](file://trading_bot/sentiment/analyzer.py#L1-L458)
+- [rl_strategy.py:19-285](file://trading_bot/strategy/rl_strategy.py#L19-L285)
+- [copy_trading.py:16-248](file://trading_bot/api/routes/copy_trading.py#L16-L248)
+- [Social.tsx:25-467](file://frontend/src/pages/Social.tsx#L25-L467)
+- [AITradingHub.tsx:123-800](file://frontend/src/components/AITradingHub.tsx#L123-L800)
+- [storage.py:53-484](file://trading_bot/data/storage.py#L53-L484)
+- [dashboard.py:16-328](file://trading_bot/monitoring/dashboard.py#L16-L328)
 
 ## Architecture Overview
-The system follows a modern microservices architecture with clear separation between frontend, backend, and execution layers:
+The system follows a modern microservices architecture with clear separation between frontend, backend, and execution layers, enhanced with AI and social features:
 
-**Frontend Layer**: React application with real-time data binding and interactive visualizations
-**API Layer**: FastAPI backend serving RESTful endpoints for market data, sentiment, and trading operations
+**Frontend Layer**: React application with AI Trading Hub, social features, and real-time data visualization
+**API Layer**: FastAPI backend serving comprehensive endpoints for market data, copy trading, social features, and trading operations
+**AI Layer**: Reinforcement learning models with feature engineering and training pipeline
+**Data Layer**: Multi-format storage with Parquet for OHLCV and SQLite for structured data
 **Execution Layer**: Multi-broker system with unified order management and risk controls
-**Data Layer**: Real-time market data processing with caching and fallback mechanisms
+**Persistence Layer**: SQLite database with comprehensive schema for all trading activities
 
 ```mermaid
 sequenceDiagram
 participant UI as "React Frontend"
 participant API as "FastAPI Backend"
-participant Market as "Market Analysis"
-participant Broker as "Broker Manager"
-participant Data as "yfinance/Mock"
-UI->>API : GET /api/market/analysis/{symbol}
-API->>Market : analyze_symbol()
-Market->>Data : fetch_data_yf()
-Data-->>Market : OHLCV Data
-Market-->>API : Technical Analysis
-API-->>UI : Market Analysis JSON
-UI->>API : POST /api/trading/paper-order
-API->>Broker : place_order()
-Broker-->>API : Order Confirmation
-API-->>UI : Trade Result
-UI->>API : GET /api/sentiment/symbol/{symbol}
-API->>Market : get_sentiment()
-Market-->>API : Sentiment Data
-API-->>UI : Market Sentiment JSON
+participant RL as "RL Strategy"
+participant Copy as "Copy Trading"
+participant DB as "SQLite Database"
+participant Storage as "Data Storage"
+UI->>API : GET /api/copy-trading/positions
+API->>Copy : get_positions()
+Copy->>DB : get_open_copy_trades()
+DB-->>Copy : Open Positions
+Copy-->>API : Position Data
+API-->>UI : Copy Trading JSON
+UI->>API : POST /api/copy-trading/copy-signal
+API->>Copy : copy_signal()
+Copy->>DB : insert_copy_trade()
+DB-->>Copy : Trade Inserted
+Copy-->>API : Success Response
+API-->>UI : Trade Confirmation
+UI->>API : GET /api/market/recommendations
+API->>RL : generate_signals()
+RL->>Storage : load_features()
+Storage-->>RL : Market Data
+RL-->>API : AI Recommendations
+API-->>UI : Recommendation JSON
 ```
 
 **Diagram sources**
-- [Dashboard.tsx:104-186](file://frontend/src/pages/Dashboard.tsx#L104-L186)
-- [market.py:536-577](file://trading_bot/api/routes/market.py#L536-L577)
-- [broker_manager.py:135-171](file://trading_bot/execution/broker_manager.py#L135-L171)
-- [analyzer.py:347-357](file://trading_bot/sentiment/analyzer.py#L347-L357)
+- [Social.tsx:54-109](file://frontend/src/pages/Social.tsx#L54-L109)
+- [copy_trading.py:179-217](file://trading_bot/api/routes/copy_trading.py#L179-L217)
+- [copy_trading.py:122-177](file://trading_bot/api/routes/copy_trading.py#L122-L177)
+- [rl_strategy.py:182-221](file://trading_bot/strategy/rl_strategy.py#L182-L221)
+- [storage.py:118-167](file://trading_bot/data/storage.py#L118-L167)
 
 ## Detailed Component Analysis
 
-### React Frontend Architecture
-**Purpose**: Provide a modern, responsive trading interface with real-time data visualization and interactive components.
+### Reinforcement Learning Strategy Implementation
+**Purpose**: Provide AI-powered trading decisions using advanced RL algorithms with sophisticated feature engineering.
 
 **Implementation Approach**:
-- **Component-Based Design**: Modular React components with TypeScript type safety
-- **State Management**: React hooks for local state management with localStorage persistence
-- **Real-Time Updates**: WebSocket connections for live market data streaming
-- **Responsive Layout**: Tailwind CSS for adaptive design across devices
-- **Dark Theme**: Trading-appropriate color scheme with accent colors for buy/sell signals
+- **Model Architecture**: PPO and SAC algorithms with configurable LSTM/Transformer extractors
+- **Feature Engineering**: Comprehensive technical indicator pipeline with 100+ indicators
+- **Training Pipeline**: Hyperparameter optimization with Optuna and walk-forward validation
+- **Risk Management**: Integrated position sizing and risk controls within the RL framework
+- **Performance Monitoring**: Real-time performance metrics and model information tracking
 
 **Key Features**:
-- Pair selector with recent pairs tracking and default pair persistence
-- Interactive dashboard with grid-based layout for optimal screen utilization
-- Real-time price updates with change indicators and regime detection
-- Comprehensive signal visualization with multi-timeframe analysis
-- Economic calendar with countdown timers and impact ratings
+- Multi-timeframe analysis with consensus building across 5 different timeframes
+- Automated feature engineering with technical indicators and custom calculations
+- Configurable confidence thresholds and position sizing strategies
+- Real-time model loading and prediction capabilities
+- Comprehensive training pipeline with hyperparameter optimization
 
 **Section sources**
-- [App.tsx:18-176](file://frontend/src/App.tsx#L18-L176)
-- [Dashboard.tsx:50-534](file://frontend/src/pages/Dashboard.tsx#L50-L534)
+- [rl_strategy.py:19-285](file://trading_bot/strategy/rl_strategy.py#L19-L285)
+- [train.py:23-446](file://trading_bot/models/train.py#L23-L446)
 
-### TradingChart Component with TradingView Integration
-**Purpose**: Display real-time financial charts with technical indicators and interactive signal visualization.
-
-**Implementation Approach**:
-- **TradingView Widget**: Integration with lightweight-charts library for professional-grade charting
-- **Real-Time Updates**: Polling mechanism for live candle updates with intelligent caching
-- **Signal Visualization**: Interactive markers for entry/exit points with color-coded status indicators
-- **Customizable Timeframes**: Support for 1m, 5m, 15m, 1h, 4h, and 1d chart intervals
-- **Volume Analysis**: Histogram overlay for trading volume visualization
-
-**Performance Characteristics**:
-- Adaptive polling intervals based on timeframe (5s for 1m/5m, 15s for 15m/1h, 60s for 4h/1d)
-- Efficient candle data synchronization with automatic updates
-- Optimized rendering with chart resize observers
-- Signal marker caching to prevent unnecessary re-rendering
-
-**Section sources**
-- [TradingChart.tsx:86-421](file://frontend/src/components/TradingChart.tsx#L86-L421)
-
-### Economic Calendar Component
-**Purpose**: Provide automated economic event tracking with countdown timers and impact ratings.
+### Copy Trading System with SQLite Persistence
+**Purpose**: Enable comprehensive copy trading functionality with real-time position management and risk controls.
 
 **Implementation Approach**:
-- **Event Templates**: Comprehensive database of major economic events across different currencies
-- **Automatic Scheduling**: Intelligent event scheduling based on frequency (monthly/quarterly)
-- **Countdown Timers**: Real-time countdown displays with dynamic formatting
-- **Impact Classification**: Visual indicators for high, medium, and low impact events
-- **Currency Mapping**: Automatic event filtering based on selected trading pair
-
-**Features**:
-- Upcoming events display with formatted dates and impact ratings
-- Countdown timer showing time remaining until next event
-- Event categorization by economic importance and currency relevance
-- Automatic timezone handling for international users
-
-**Section sources**
-- [EconomicCalendar.tsx:140-240](file://frontend/src/components/EconomicCalendar.tsx#L140-L240)
-
-### SentimentPanel Component
-**Purpose**: Display real-time market sentiment with visual gauges and trend analysis.
-
-**Implementation Approach**:
-- **Sentiment Scoring**: Algorithmic sentiment analysis with bullish/bearish/neutral classification
-- **Visual Gauges**: SVG-based sentiment gauges with color-coded zones
-- **Trend Analysis**: 24-hour sentiment trend with gradient fills
-- **Headline Integration**: Latest news headlines with sentiment scores and timestamps
-- **Real-Time Updates**: Automatic refresh every 60 seconds with loading states
-
-**Components**:
-- Sentiment gauge with needle indicator and color zones
-- Sparkline chart showing sentiment trend over 24 hours
-- Headlines list with source attribution and sentiment indicators
-- Last updated timestamp with human-readable formatting
-
-**Section sources**
-- [SentimentPanel.tsx:220-331](file://frontend/src/components/SentimentPanel.tsx#L220-L331)
-
-### FastAPI Backend Server
-**Purpose**: Provide RESTful API endpoints for market data, sentiment analysis, and trading operations.
-
-**Implementation Approach**:
-- **Route Organization**: Modular routing with dedicated endpoints for different functionalities
-- **CORS Configuration**: Flexible cross-origin resource sharing for frontend integration
-- **Middleware Stack**: Custom middleware for caching control and request/response processing
-- **Health Checks**: Comprehensive health monitoring with uptime tracking
-- **Error Handling**: Structured error responses with detailed debugging information
-
-**API Endpoints**:
-- Market analysis endpoints for technical indicator calculations
-- Candle data endpoints with real-time and historical data
-- Sentiment analysis endpoints with keyword-based scoring
-- Trading operation endpoints for paper and live execution
-- Configuration endpoints for system settings and broker management
-
-**Section sources**
-- [server.py:15-87](file://trading_bot/api/server.py#L15-L87)
-
-### Market Analysis API
-**Purpose**: Provide comprehensive market analysis with technical indicators and multi-timeframe analysis.
-
-**Implementation Approach**:
-- **Technical Indicators**: Implementation of RSI, MACD, EMA, Bollinger Bands, and ATR calculations
-- **Multi-Timeframe Analysis**: Consensus building across multiple timeframes for enhanced accuracy
-- **Risk-Reward Calculation**: Automated stop-loss and take-profit level determination
-- **Mock Data Fallback**: Realistic synthetic data generation when real data is unavailable
-- **Caching Mechanism**: Intelligent caching with TTL-based expiration for performance optimization
+- **Complete Persistence**: SQLite schema for copy settings, positions, and history tracking
+- **Real-Time Management**: Live position monitoring with automatic TP/SL checking and closure
+- **Risk Controls**: Configurable position limits, risk percentages, and concurrent position controls
+- **Performance Analytics**: Win rate tracking, P&L calculations, and statistical reporting
+- **API Integration**: Comprehensive RESTful endpoints for copy trading operations
 
 **Key Features**:
-- Real-time market analysis with confidence scoring
-- Multi-timeframe signal alignment with percentage-based consensus
-- Trade-style specific calculations for scalping and swing trading
-- Comprehensive indicator analysis with bullish/bearish/neutral classifications
-- Market regime detection for trending, ranging, volatile, and trending-down conditions
+- Configurable copy trading settings with enable/disable controls
+- Real-time position monitoring with automatic TP/SL checking
+- Risk management with position size limits and risk percentage controls
+- Performance tracking with win rate and P&L calculations
+- Historical trade tracking and statistics reporting
 
 **Section sources**
-- [market.py:235-476](file://trading_bot/api/routes/market.py#L235-L476)
-- [market.py:536-743](file://trading_bot/api/routes/market.py#L536-L743)
+- [copy_trading.py:16-248](file://trading_bot/api/routes/copy_trading.py#L16-L248)
+- [repositories.py:107-201](file://trading_bot/persistence/repositories.py#L107-L201)
+- [db.py:14-36](file://trading_bot/persistence/db.py#L14-L36)
 
-### Multi-Broker Execution System
-**Purpose**: Provide unified access to multiple trading brokers with consistent order management.
+### Advanced Social Trading Platform
+**Purpose**: Provide comprehensive social trading features including leaderboards, signal sharing, and community engagement.
 
 **Implementation Approach**:
-- **Broker Abstraction**: Unified interface for different broker APIs (CCXT, OANDA, Alpaca)
-- **Connection Management**: Centralized broker connection handling with credential management
-- **Order Routing**: Intelligent order routing with broker selection criteria
-- **Position Management**: Unified position tracking across multiple brokers
-- **Risk Controls**: Consistent risk management across all broker integrations
+- **Leaderboard System**: Real-time performance rankings with configurable timeframes
+- **Signal Sharing**: Community-driven signal sharing with confidence levels and risk parameters
+- **Profile Management**: User statistics, following/unfollowing capabilities, and performance metrics
+- **Trending Analysis**: Market sentiment tracking and popular symbol identification
+- **Integration Points**: Seamless integration between AI recommendations and social features
 
-**Supported Brokers**:
-- **CCXT**: Cryptocurrency exchanges including Binance, Bybit, OKX, Kraken
-- **OANDA**: Professional Forex market access
-- **Alpaca**: US stock market commission-free trading
-
-**Features**:
-- Dynamic broker registration and discovery
-- Connection status monitoring and health checks
-- Order cancellation and modification across brokers
-- Balance and position retrieval from multiple sources
-- Active broker selection with failover capabilities
+**Key Features**:
+- Multi-period leaderboard with weekly, monthly, and all-time rankings
+- Signal sharing with comprehensive risk and reward parameters
+- User profile management with performance statistics
+- Trending symbol identification and market sentiment tracking
+- Following system with real-time performance updates
 
 **Section sources**
-- [broker_manager.py:18-299](file://trading_bot/execution/broker_manager.py#L18-L299)
+- [Social.tsx:25-467](file://frontend/src/pages/Social.tsx#L25-L467)
+- [LeaderboardTable.tsx:12-228](file://frontend/src/components/LeaderboardTable.tsx#L12-L228)
+- [AIRecommendations.tsx:134-289](file://frontend/src/components/AIRecommendations.tsx#L134-L289)
 
-### Sentiment Analysis Engine
-**Purpose**: Analyze market sentiment from news sources and provide quantitative sentiment scores.
+### Enhanced Market Data Infrastructure
+**Purpose**: Provide robust data storage and retrieval capabilities with multiple formats and caching mechanisms.
 
 **Implementation Approach**:
-- **Keyword-Based Analysis**: Keyword matching for currency pairs and market themes
-- **Headline Generation**: Realistic headline generation with sentiment bias
-- **Trend Analysis**: 24-hour sentiment trend with moving averages
-- **Cache Management**: Intelligent caching with TTL-based expiration
-- **Scalable Architecture**: Thread-safe sentiment analysis with concurrent access support
+- **Multi-Format Storage**: Parquet files for OHLCV data and SQLite for structured trading data
+- **Real-Time Caching**: Intelligent caching with TTL-based expiration for performance optimization
+- **Historical Data Management**: Efficient storage and retrieval of large market datasets
+- **Data Validation**: Robust data quality checks and error handling for reliable market analysis
+- **Backup Systems**: Multiple storage formats ensuring data durability and accessibility
 
-**Sentiment Categories**:
-- **Bullish**: Positive sentiment with scores above 0.2
-- **Bearish**: Negative sentiment with scores below -0.2
-- **Neutral**: Mixed sentiment with scores between -0.2 and 0.2
-
-**Features**:
-- Realistic headline generation with source attribution
-- 24-hour sentiment trend with gradient visualization
-- Keyword-based sentiment scoring with confidence levels
-- Automatic cache invalidation and refresh
-- Scalable architecture supporting concurrent requests
+**Key Features**:
+- Parquet storage for efficient OHLCV data with automatic deduplication
+- SQLite caching for real-time market data with TTL expiration
+- Comprehensive data validation and error handling
+- Multi-format data export and import capabilities
+- Performance optimization with intelligent caching strategies
 
 **Section sources**
-- [analyzer.py:9-458](file://trading_bot/sentiment/analyzer.py#L9-L458)
+- [storage.py:53-484](file://trading_bot/data/storage.py#L53-L484)
 
-### Configuration Management
-**Purpose**: Centralized configuration management with validation and environment-specific settings.
+### Advanced Monitoring Dashboard
+**Purpose**: Provide comprehensive performance analytics and real-time monitoring capabilities.
 
 **Implementation Approach**:
-- **Pydantic Validation**: Type-safe configuration with automatic validation
-- **Environment Variables**: Support for environment-specific configuration
-- **Default Values**: Comprehensive default values for all configuration options
-- **Path Resolution**: Automatic path resolution and directory creation
-- **Enum Validation**: Strongly typed enumerations for trading modes and model types
+- **Performance Visualization**: Equity curves, drawdown analysis, and statistical metrics
+- **Trade Analytics**: Comprehensive trade distribution, win/loss ratios, and performance breakdowns
+- **Risk Monitoring**: Real-time risk assessment with circuit breaker integration
+- **Alert System**: Comprehensive notification system for trading events and system status
+- **Metrics Tracking**: Persistent storage of performance metrics for historical analysis
 
-**Configuration Categories**:
-- **Exchange Configuration**: API keys and testnet settings for multiple exchanges
-- **Trading Configuration**: Symbol lists, timeframes, and position sizing
-- **Risk Management**: Drawdown limits, position sizing, and exposure controls
-- **Data Storage**: Database paths, Redis configuration, and model storage
-- **Notification Configuration**: Telegram and Discord integration settings
+**Key Features**:
+- Interactive equity curve visualization with trade markers
+- Drawdown analysis with percentage-based visualization
+- Monthly returns heatmap for seasonal performance analysis
+- Trade distribution charts with P&L and duration analysis
+- Real-time performance metrics with configurable timeframes
 
 **Section sources**
-- [settings.py:23-176](file://trading_bot/config/settings.py#L23-L176)
+- [dashboard.py:16-328](file://trading_bot/monitoring/dashboard.py#L16-L328)
+
+### Modern React Frontend Components
+**Purpose**: Provide a comprehensive trading interface with AI recommendations, social features, and real-time data visualization.
+
+**Implementation Approach**:
+- **AI Trading Hub**: Centralized trading interface with signal analysis and risk management
+- **Social Features**: Leaderboard integration, signal sharing, and community interaction
+- **Pair Selection**: Advanced pair selection with heatmap visualization and performance tracking
+- **Real-Time Updates**: WebSocket connections for live market data and social feeds
+- **Responsive Design**: Mobile-friendly interface with dark theme trading aesthetics
+
+**Key Features**:
+- AI Trading Hub with comprehensive signal analysis and copy trading integration
+- Leaderboard with sorting, filtering, and following capabilities
+- AI Recommendations with confidence scoring and risk analysis
+- Pair Heatmap with performance visualization and selection
+- Responsive design with dark theme and trading-specific aesthetics
+
+**Section sources**
+- [AITradingHub.tsx:123-800](file://frontend/src/components/AITradingHub.tsx#L123-L800)
+- [LeaderboardTable.tsx:12-228](file://frontend/src/components/LeaderboardTable.tsx#L12-L228)
+- [AIRecommendations.tsx:134-289](file://frontend/src/components/AIRecommendations.tsx#L134-L289)
+- [PairHeatmap.tsx:11-124](file://frontend/src/components/PairHeatmap.tsx#L11-L124)
 
 ## Dependency Analysis
-The system exhibits clear separation of concerns with well-defined dependencies between frontend and backend components:
+The system exhibits clear separation of concerns with well-defined dependencies between AI, social, and traditional trading components:
 
-**Frontend Dependencies**:
-- React components depend on shared TypeScript types and utility functions
-- Chart components depend on TradingView widget and real-time data services
-- Economic calendar depends on currency mapping and event scheduling logic
-- Sentiment panels depend on sentiment analysis API endpoints
+**AI and Machine Learning Dependencies**:
+- RL Strategy depends on feature engineering pipeline and training infrastructure
+- Training pipeline depends on data storage and feature engineering modules
+- Model optimization uses Optuna for hyperparameter tuning with comprehensive validation
 
-**Backend Dependencies**:
-- API routes depend on market analysis engine and broker manager
-- Market analysis depends on yfinance integration and technical indicator calculations
-- Broker manager depends on individual broker implementations
-- Sentiment analyzer depends on keyword databases and headline templates
+**Social and Community Dependencies**:
+- Social features depend on copy trading API for real-time position data
+- Leaderboard system depends on user statistics and performance metrics
+- Signal sharing integrates with AI recommendation system for community signals
+
+**Data and Storage Dependencies**:
+- API routes depend on persistence layer for all data operations
+- Copy trading system depends on SQLite schema for position and settings management
+- Market data endpoints depend on storage infrastructure for historical and real-time data
+
+**Frontend and Backend Dependencies**:
+- React components depend on FastAPI endpoints for all data operations
+- Social features integrate with AI Trading Hub for comprehensive trading experience
+- Monitoring dashboard depends on performance metrics from trading operations
 
 ```mermaid
 graph TB
+# AI Components
+RL_STRATEGY["RL Strategy<br/>rl_strategy.py"]
+TRAINING["Training Pipeline<br/>train.py"]
+FEATURES["Feature Engineering<br/>features/engineering.py"]
+# Social Components
+SOCIAL["Social Platform<br/>Social.tsx"]
+LEADERBOARD["Leaderboard<br/>LeaderboardTable.tsx"]
+AI_RECS["AI Recommendations<br/>AIRecommendations.tsx"]
+# Data Components
+STORAGE["Data Storage<br/>storage.py"]
+DB["SQLite Database<br/>db.py"]
+REPOS["Repositories<br/>repositories.py"]
 # Frontend Components
-APP["App.tsx"]
-DASHBOARD["Dashboard.tsx"]
-CHART["TradingChart.tsx"]
-ECON["EconomicCalendar.tsx"]
-SENTIMENT["SentimentPanel.tsx"]
+AITRADING["AI Trading Hub<br/>AITradingHub.tsx"]
+PAIRMAP["Pair Heatmap<br/>PairHeatmap.tsx"]
 # Backend Components
-SERVER["server.py"]
-MARKET["market.py"]
-BROKER["broker_manager.py"]
-ANALYZER["analyzer.py"]
+SERVER["FastAPI Server<br/>server.py"]
+COPY_API["Copy Trading API<br/>copy_trading.py"]
 # External Dependencies
-YFINANCE["yfinance"]
-REDIS["Redis Cache"]
-BROKER_EXCHANGES["CCXT/OANDA/Alpaca"]
-# Frontend to Backend Dependencies
-APP --> SERVER
-DASHBOARD --> SERVER
-CHART --> SERVER
-ECON --> SERVER
-SENTIMENT --> SERVER
-# Backend Internal Dependencies
-SERVER --> MARKET
-SERVER --> BROKER
-SERVER --> ANALYZER
-MARKET --> YFINANCE
-MARKET --> REDIS
-BROKER --> BROKER_EXCHANGES
-ANALYZER --> MARKET
+OPTUNA["Optuna<br/>hyperparameter optimization"]
+PARQUET["Parquet<br/>efficient storage"]
+SQLITE["SQLite<br/>structured data"]
+# AI Dependencies
+RL_STRATEGY --> FEATURES
+TRAINING --> RL_STRATEGY
+TRAINING --> STORAGE
+# Social Dependencies
+SOCIAL --> COPY_API
+LEADERBOARD --> SOCIAL
+AI_RECS --> SOCIAL
+# Data Dependencies
+COPY_API --> REPOS
+REPOS --> DB
+STORAGE --> PARQUET
+# Frontend Dependencies
+AITRADING --> SERVER
+PAIRMAP --> SERVER
+# Backend Dependencies
+SERVER --> COPY_API
+SERVER --> RL_STRATEGY
+SERVER --> STORAGE
+# External Dependencies
+TRAINING --> OPTUNA
+STORAGE --> SQLITE
 ```
 
 **Diagram sources**
-- [App.tsx:1-176](file://frontend/src/App.tsx#L1-L176)
-- [Dashboard.tsx:1-534](file://frontend/src/pages/Dashboard.tsx#L1-L534)
-- [TradingChart.tsx:1-421](file://frontend/src/components/TradingChart.tsx#L1-L421)
-- [EconomicCalendar.tsx:1-240](file://frontend/src/components/EconomicCalendar.tsx#L1-L240)
-- [SentimentPanel.tsx:1-331](file://frontend/src/components/SentimentPanel.tsx#L1-L331)
-- [server.py:1-87](file://trading_bot/api/server.py#L1-L87)
-- [market.py:1-743](file://trading_bot/api/routes/market.py#L1-L743)
-- [broker_manager.py:1-299](file://trading_bot/execution/broker_manager.py#L1-L299)
-- [analyzer.py:1-458](file://trading_bot/sentiment/analyzer.py#L1-L458)
+- [rl_strategy.py:1-285](file://trading_bot/strategy/rl_strategy.py#L1-L285)
+- [train.py:1-446](file://trading_bot/models/train.py#L1-L446)
+- [Social.tsx:1-467](file://frontend/src/pages/Social.tsx#L1-L467)
+- [LeaderboardTable.tsx:1-228](file://frontend/src/components/LeaderboardTable.tsx#L1-L228)
+- [AIRecommendations.tsx:1-289](file://frontend/src/components/AIRecommendations.tsx#L1-L289)
+- [storage.py:1-484](file://trading_bot/data/storage.py#L1-L484)
+- [db.py:1-36](file://trading_bot/persistence/db.py#L1-L36)
+- [repositories.py:1-277](file://trading_bot/persistence/repositories.py#L1-L277)
+- [AITradingHub.tsx:1-800](file://frontend/src/components/AITradingHub.tsx#L1-L800)
+- [PairHeatmap.tsx:1-124](file://frontend/src/components/PairHeatmap.tsx#L1-L124)
+- [server.py:1-115](file://trading_bot/api/server.py#L1-L115)
+- [copy_trading.py:1-248](file://trading_bot/api/routes/copy_trading.py#L1-L248)
 
 **Section sources**
-- [App.tsx:1-176](file://frontend/src/App.tsx#L1-L176)
-- [server.py:1-87](file://trading_bot/api/server.py#L1-L87)
+- [rl_strategy.py:1-285](file://trading_bot/strategy/rl_strategy.py#L1-L285)
+- [Social.tsx:1-467](file://frontend/src/pages/Social.tsx#L1-L467)
+- [server.py:1-115](file://trading_bot/api/server.py#L1-L115)
 
 ## Performance Considerations
-- **Frontend Optimization**: React.memo usage for expensive components, lazy loading for chart libraries, efficient state updates
-- **API Caching**: Intelligent caching with TTL-based expiration, cache warming strategies, and cache invalidation
-- **Real-time Updates**: Adaptive polling intervals, WebSocket integration for live data, debounced API calls
-- **Chart Performance**: Efficient candle data updates, optimized rendering, memory management for large datasets
-- **Broker Connectivity**: Connection pooling, retry mechanisms, circuit breakers for broker failures
-- **Sentiment Analysis**: Batch processing for multiple symbols, cache optimization, concurrent request handling
+- **AI Model Optimization**: RL model training with hyperparameter optimization, walk-forward validation, and efficient feature engineering
+- **Data Storage Efficiency**: Parquet compression for OHLCV data, SQLite WAL mode for concurrent access, and intelligent caching strategies
+- **Real-time Updates**: WebSocket integration for live data, adaptive polling intervals, and efficient state updates
+- **Copy Trading Performance**: Real-time position monitoring with automatic TP/SL checking and efficient database queries
+- **Social Feature Scaling**: Leaderboard optimization with configurable limits, efficient user statistics computation, and scalable signal sharing
+- **Frontend Optimization**: React.memo usage for expensive components, lazy loading for charts, and efficient data fetching strategies
 
 ## Troubleshooting Guide
-**Frontend Issues**:
-- **Chart Loading Failures**: Verify TradingView widget availability, check network connectivity, ensure proper CORS configuration
-- **Real-time Updates**: Confirm WebSocket connections, check browser console for JavaScript errors, verify API endpoint accessibility
-- **Component Rendering**: Validate React component dependencies, check TypeScript compilation errors, ensure proper prop types
+**AI and Machine Learning Issues**:
+- **Model Training Failures**: Verify Optuna installation, check hyperparameter ranges, ensure sufficient training data
+- **Feature Engineering Errors**: Validate technical indicator calculations, check data quality, ensure proper feature scaling
+- **RL Strategy Problems**: Confirm model loading, verify feature engineering pipeline, check confidence thresholds
 
-**Backend Issues**:
-- **API Endpoint Failures**: Verify FastAPI server status, check route registration, confirm dependency injection
-- **Market Data Retrieval**: Validate yfinance connectivity, check API rate limits, ensure proper error handling
-- **Broker Integration**: Confirm broker credentials, check exchange availability, verify connection timeouts
-- **Sentiment Analysis**: Validate keyword databases, check cache configuration, ensure proper data serialization
+**Copy Trading Issues**:
+- **Position Management Failures**: Verify SQLite schema, check database connectivity, ensure proper transaction handling
+- **Risk Control Problems**: Validate position limits, check risk percentage calculations, confirm concurrent position controls
+- **API Endpoint Failures**: Verify copy trading routes, check request validation, ensure proper error handling
+
+**Data Storage Issues**:
+- **Parquet Storage Failures**: Check file permissions, verify Parquet format compatibility, ensure proper data serialization
+- **SQLite Connection Problems**: Validate database initialization, check connection pooling, ensure proper schema migration
+- **Caching Issues**: Verify TTL settings, check cache invalidation, ensure proper cache warming strategies
+
+**Frontend Issues**:
+- **Component Rendering Failures**: Verify React component dependencies, check TypeScript compilation, ensure proper prop types
+- **API Integration Problems**: Confirm endpoint accessibility, check CORS configuration, validate request/response formats
+- **Real-time Updates**: Verify WebSocket connections, check browser compatibility, ensure proper error handling
 
 **System Integration**:
 - **Cross-Origin Issues**: Verify CORS configuration, check allowed origins, ensure proper header settings
@@ -472,10 +466,10 @@ ANALYZER --> MARKET
 - **Deployment Issues**: Verify environment variables, check Docker configuration, ensure proper file permissions
 
 **Section sources**
-- [TradingChart.tsx:183-299](file://frontend/src/components/TradingChart.tsx#L183-L299)
-- [market.py:206-233](file://trading_bot/api/routes/market.py#L206-L233)
-- [broker_manager.py:69-88](file://trading_bot/execution/broker_manager.py#L69-L88)
-- [analyzer.py:347-357](file://trading_bot/sentiment/analyzer.py#L347-L357)
+- [train.py:187-244](file://trading_bot/models/train.py#L187-L244)
+- [copy_trading.py:122-177](file://trading_bot/api/routes/copy_trading.py#L122-L177)
+- [storage.py:71-116](file://trading_bot/data/storage.py#L71-L116)
+- [db.py:14-36](file://trading_bot/persistence/db.py#L14-L36)
 
 ## Conclusion
-The AI Trading Bot platform represents a comprehensive, modern trading solution with a sophisticated frontend/backend architecture, multi-broker execution capabilities, and advanced visualization components. The system combines real-time market data processing, AI-powered trading recommendations, economic calendar integration, and sentiment analysis to provide traders with a complete analytical toolkit. The modular design enables easy maintenance, scalability, and extension to additional markets and instruments while maintaining high performance and reliability standards.
+The AI Trading Bot platform represents a comprehensive, production-ready trading solution with advanced AI-powered capabilities, comprehensive copy trading functionality, and sophisticated social features. The system combines reinforcement learning models with LSTM/Transformer extractors, real-time market data processing, advanced risk management, and extensive social trading capabilities. The modular architecture enables easy maintenance, scalability, and extension to additional markets and instruments while maintaining high performance and reliability standards. The integration of AI recommendations, copy trading, and social features creates a complete trading ecosystem that enhances both individual and community trading experiences.

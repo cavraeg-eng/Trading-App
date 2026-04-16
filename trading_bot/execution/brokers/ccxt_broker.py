@@ -113,6 +113,10 @@ class CCXTBroker(BaseBroker):
         quantity: float,
         order_type: OrderType = OrderType.MARKET,
         price: Optional[float] = None,
+        stop_loss: Optional[float] = None,
+        take_profit_1: Optional[float] = None,
+        take_profit_2: Optional[float] = None,
+        take_profit_3: Optional[float] = None,
     ) -> BrokerOrder:
         """Place an order on the exchange.
 
@@ -274,6 +278,84 @@ class CCXTBroker(BaseBroker):
             logger.error(f"Failed to fetch balance from {self.exchange_id}: {e}")
             return BrokerBalance(total_equity=0, available_margin=0, used_margin=0)
 
+    def _map_order_type(self, raw_type: str) -> OrderType:
+        normalized = raw_type.lower()
+        if normalized == "market":
+            return OrderType.MARKET
+        if normalized == "limit":
+            return OrderType.LIMIT
+        return OrderType.STOP
+
+    def _parse_timestamp(self, value: Any) -> datetime:
+        if isinstance(value, (int, float)):
+            return datetime.utcfromtimestamp(float(value) / 1000)
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return datetime.utcnow()
+        return datetime.utcnow()
+
+    def _to_broker_order(self, order_response: Dict[str, Any]) -> BrokerOrder:
+        created_at = order_response.get("timestamp") or order_response.get("datetime")
+        updated_at = (
+            order_response.get("lastTradeTimestamp")
+            or order_response.get("lastUpdateTimestamp")
+            or created_at
+        )
+
+        return BrokerOrder(
+            order_id=str(order_response.get("id", "")),
+            symbol=order_response.get("symbol", ""),
+            side=OrderSide(order_response.get("side", "buy")),
+            order_type=self._map_order_type(order_response.get("type", "market")),
+            quantity=float(order_response.get("amount", 0.0) or 0.0),
+            price=float(order_response.get("price", 0.0)) if order_response.get("price") else None,
+            status=self._map_order_status(order_response.get("status", "open")),
+            filled_quantity=float(order_response.get("filled", 0.0) or 0.0),
+            avg_fill_price=float(order_response.get("average", 0.0)) if order_response.get("average") else 0.0,
+            created_at=self._parse_timestamp(created_at),
+            updated_at=self._parse_timestamp(updated_at),
+            broker_id=self.broker_id,
+            metadata=order_response,
+        )
+
+    async def get_orders(
+        self,
+        count: int = 50,
+        symbol: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> List[BrokerOrder]:
+        """Get recent orders from the exchange."""
+        if not self.connected or not self.exchange:
+            raise RuntimeError(f"Not connected to {self.exchange_id}")
+
+        try:
+            normalized_status = (status or "").lower()
+
+            if normalized_status in {"pending", "open"}:
+                raw_orders = await self.exchange.fetch_open_orders(symbol, None, count)
+            elif normalized_status in {"filled", "cancelled", "canceled", "rejected"}:
+                raw_orders = await self.exchange.fetch_closed_orders(symbol, None, count)
+            else:
+                try:
+                    raw_orders = await self.exchange.fetch_orders(symbol, None, count)
+                except Exception:
+                    open_orders = await self.exchange.fetch_open_orders(symbol, None, count)
+                    try:
+                        closed_orders = await self.exchange.fetch_closed_orders(symbol, None, count)
+                    except Exception:
+                        closed_orders = []
+                    raw_orders = [*open_orders, *closed_orders]
+
+            orders = [self._to_broker_order(order_response) for order_response in raw_orders]
+            if normalized_status:
+                orders = [order for order in orders if order.status.value == normalized_status]
+            return orders[:count]
+        except Exception as e:
+            logger.error(f"Failed to fetch orders from {self.exchange_id}: {e}")
+            return []
+
     async def get_order_status(self, order_id: str) -> BrokerOrder:
         """Get status of a specific order.
 
@@ -291,19 +373,7 @@ class CCXTBroker(BaseBroker):
             # We'll need to handle this differently or store symbol with order
             order_response = await self.exchange.fetch_order(order_id)
 
-            return BrokerOrder(
-                order_id=str(order_response.get("id", order_id)),
-                symbol=order_response.get("symbol", ""),
-                side=OrderSide(order_response.get("side", "buy")),
-                order_type=OrderType(order_response.get("type", "market")),
-                quantity=float(order_response.get("amount", 0.0)),
-                price=float(order_response.get("price", 0.0)) if order_response.get("price") else None,
-                status=self._map_order_status(order_response.get("status", "open")),
-                filled_quantity=float(order_response.get("filled", 0.0)),
-                avg_fill_price=float(order_response.get("average", 0.0)) if order_response.get("average") else 0.0,
-                broker_id=self.broker_id,
-                metadata=order_response,
-            )
+            return self._to_broker_order(order_response)
 
         except Exception as e:
             logger.error(f"Failed to fetch order status from {self.exchange_id}: {e}")
