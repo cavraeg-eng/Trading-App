@@ -730,6 +730,8 @@ def get_trade_ledger_entries(
     broker_id: Optional[str] = None,
     symbol: Optional[str] = None,
     status: Optional[str] = None,
+    side: Optional[str] = None,
+    outcome: Optional[str] = None,
     limit: int = 100,
 ) -> List[dict]:
     query = "SELECT * FROM trade_ledger_entries WHERE 1=1"
@@ -743,6 +745,12 @@ def get_trade_ledger_entries(
     if status:
         query += " AND status=?"
         params.append(status)
+    if side:
+        query += " AND side=?"
+        params.append(side)
+    if outcome:
+        query += " AND outcome=?"
+        params.append(outcome)
     query += " ORDER BY updated_at DESC LIMIT ?"
     params.append(limit)
     rows = get_conn().execute(query, params).fetchall()

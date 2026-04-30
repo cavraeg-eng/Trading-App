@@ -107,6 +107,40 @@ def test_trade_ledger_csv_export(tmp_path):
     assert "signal-1" in body
 
 
+def test_trade_ledger_csv_export_filters_side_and_outcome(tmp_path):
+    init_db(tmp_path / "ledger_export_filters.db")
+    repo.upsert_trade_ledger_entry({
+        "broker_id": "oanda",
+        "source_type": "trade",
+        "source_id": "win-long",
+        "symbol": "XAU/USD",
+        "side": "long",
+        "status": "closed",
+        "outcome": "WIN",
+        "quantity": 1.0,
+        "realized_pnl": 20.0,
+    })
+    repo.upsert_trade_ledger_entry({
+        "broker_id": "oanda",
+        "source_type": "trade",
+        "source_id": "loss-short",
+        "symbol": "XAU/USD",
+        "side": "short",
+        "status": "closed",
+        "outcome": "LOSS",
+        "quantity": 1.0,
+        "realized_pnl": -10.0,
+    })
+
+    client = TestClient(app)
+    response = client.get("/api/broker/ledger/export?broker_id=oanda&side=short&outcome=LOSS")
+
+    assert response.status_code == 200
+    body = response.text
+    assert "loss-short" in body
+    assert "win-long" not in body
+
+
 def test_trade_ledger_metrics_include_outcomes(tmp_path):
     init_db(tmp_path / "ledger_metrics.db")
     trade_ledger.reconcile_history("oanda", [{

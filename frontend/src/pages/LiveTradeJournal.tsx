@@ -21,6 +21,11 @@ function formatCurrency(value: number) {
   return `${value >= 0 ? '+' : '-'}$${Math.abs(value).toFixed(2)}`
 }
 
+function formatOptionalSignedCurrency(value?: number | null) {
+  if (value == null || !Number.isFinite(value)) return '—'
+  return formatCurrency(value)
+}
+
 function formatOptionalCurrency(value?: number | null) {
   if (value == null || !Number.isFinite(value)) return '—'
   return `$${Math.abs(value).toFixed(2)}`
@@ -58,6 +63,7 @@ function matchesSearch(entry: LedgerEntry, search: string) {
     entry.status,
     entry.outcome,
     entry.signal_id,
+    metadataString(entry, 'notes', 'note', 'review_notes', 'reason'),
   ].some((value) => String(value ?? '').toLowerCase().includes(needle))
 }
 
@@ -91,6 +97,11 @@ function metadataNumber(entry: LedgerEntry, ...keys: string[]) {
     }
   }
   return null
+}
+
+function getEntryPnl(entry: LedgerEntry) {
+  const value = entry.closed_at ? entry.realized_pnl : entry.unrealized_pnl
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 export default function LiveTradeJournal() {
@@ -165,8 +176,8 @@ export default function LiveTradeJournal() {
     return [...rows].sort((first, second) => {
       if (sortKey === 'symbol_asc') return first.symbol.localeCompare(second.symbol)
       if (sortKey === 'pnl_desc' || sortKey === 'pnl_asc') {
-        const firstPnl = first.closed_at ? first.realized_pnl : first.unrealized_pnl
-        const secondPnl = second.closed_at ? second.realized_pnl : second.unrealized_pnl
+        const firstPnl = getEntryPnl(first) ?? Number.NEGATIVE_INFINITY
+        const secondPnl = getEntryPnl(second) ?? Number.NEGATIVE_INFINITY
         return sortKey === 'pnl_desc' ? secondPnl - firstPnl : firstPnl - secondPnl
       }
       const firstTime = Date.parse(first.updated_at)
@@ -185,8 +196,10 @@ export default function LiveTradeJournal() {
     brokerId: brokerFilter !== 'all' ? brokerFilter : undefined,
     symbol: symbolFilter !== 'all' ? symbolFilter : undefined,
     status: statusFilter !== 'all' ? statusFilter : undefined,
+    side: sideFilter !== 'all' ? sideFilter : undefined,
+    outcome: outcomeFilter !== 'all' ? outcomeFilter : undefined,
     count: 2000,
-  }), [brokerFilter, statusFilter, symbolFilter])
+  }), [brokerFilter, outcomeFilter, sideFilter, statusFilter, symbolFilter])
 
   return (
     <div className="mx-auto max-w-7xl p-6">
@@ -367,7 +380,7 @@ export default function LiveTradeJournal() {
                 const riskAmount = metadataNumber(entry, 'risk_amount', 'riskAmount', 'maxRiskAmount')
                 const confidence = metadataNumber(entry, 'confidence', 'signal_confidence', 'signalConfidence')
                 const notes = metadataString(entry, 'notes', 'note', 'review_notes', 'reason') ?? '—'
-                const pnl = entry.closed_at ? entry.realized_pnl : entry.unrealized_pnl
+                const pnl = getEntryPnl(entry)
 
                 return (
                   <tr key={entry.ledger_id} className="border-b border-trading-border/60 last:border-b-0">
@@ -409,8 +422,8 @@ export default function LiveTradeJournal() {
                       <div>{entry.r_multiple != null ? `${entry.r_multiple.toFixed(2)}R` : '—'}</div>
                       <div className="text-xs">{entry.mfe != null ? entry.mfe.toFixed(2) : '—'} / {entry.mae != null ? entry.mae.toFixed(2) : '—'}</div>
                     </td>
-                    <td className={`px-3 py-3 text-right font-semibold tabular-nums ${pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {formatCurrency(pnl)}
+                    <td className={`px-3 py-3 text-right font-semibold tabular-nums ${pnl == null ? 'text-trading-muted' : pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {formatOptionalSignedCurrency(pnl)}
                     </td>
                   </tr>
                 )
