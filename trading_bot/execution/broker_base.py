@@ -1,7 +1,7 @@
 """Abstract base class for broker integrations."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -49,21 +49,7 @@ class BrokerCapabilities:
 
     def as_dict(self) -> Dict[str, bool]:
         """Return capabilities as a serializable dictionary."""
-        return {
-            "market_orders": self.market_orders,
-            "limit_orders": self.limit_orders,
-            "stop_orders": self.stop_orders,
-            "bracket_orders": self.bracket_orders,
-            "cancel_orders": self.cancel_orders,
-            "positions": self.positions,
-            "balances": self.balances,
-            "order_status": self.order_status,
-            "order_history": self.order_history,
-            "trade_history": self.trade_history,
-            "close_position": self.close_position,
-            "modify_trade": self.modify_trade,
-            "quotes": self.quotes,
-        }
+        return asdict(self)
 
 
 class BrokerConfigurationError(Exception):

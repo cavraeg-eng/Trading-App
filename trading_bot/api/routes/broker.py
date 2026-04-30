@@ -42,6 +42,20 @@ class ModifyTradeRequest(BaseModel):
     take_profit: Optional[float] = None
 
 
+async def _safe_refresh_broker_ledger(
+    broker_id: str,
+    symbol: Optional[str],
+    count: int,
+) -> bool:
+    try:
+        await broker_manager.get_positions(broker_id)
+        await broker_manager.get_orders(broker_id, count=count, symbol=symbol)
+        await broker_manager.get_trade_history(broker_id, count=count, symbol=symbol)
+        return True
+    except BrokerOperationError:
+        return False
+
+
 def _serialize_order(order) -> dict:
     created_at = order.created_at.isoformat() if getattr(order, "created_at", None) else None
     updated_at = order.updated_at.isoformat() if getattr(order, "updated_at", None) else created_at
@@ -75,26 +89,16 @@ async def _refresh_trade_ledger_sources(
     if broker_id:
         status_info = broker_manager.get_broker_status(broker_id)
         if status_info["exists"] and status_info["connected"]:
-            connected_brokers.append(broker_id)
-            await broker_manager.get_positions(broker_id)
-            await broker_manager.get_orders(broker_id, count=count, symbol=symbol)
-            try:
-                await broker_manager.get_trade_history(broker_id, count=count, symbol=symbol)
-            except Exception:
-                pass
+            if await _safe_refresh_broker_ledger(broker_id, symbol, count):
+                connected_brokers.append(broker_id)
         return connected_brokers
 
     for broker_info in broker_manager.list_brokers():
         if not broker_info["connected"]:
             continue
         current_broker_id = broker_info["id"]
-        connected_brokers.append(current_broker_id)
-        await broker_manager.get_positions(current_broker_id)
-        await broker_manager.get_orders(current_broker_id, count=count, symbol=symbol)
-        try:
-            await broker_manager.get_trade_history(current_broker_id, count=count, symbol=symbol)
-        except Exception:
-            pass
+        if await _safe_refresh_broker_ledger(current_broker_id, symbol, count):
+            connected_brokers.append(current_broker_id)
     return connected_brokers
 
 
