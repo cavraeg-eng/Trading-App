@@ -26,6 +26,7 @@ class ConnectRequest(BaseModel):
     api_token: Optional[str] = None
     account_id: Optional[str] = None
     environment: Optional[str] = "sandbox"
+    live_trading_enabled: Optional[bool] = None
 
 
 class ConnectResponse(BaseModel):
