@@ -38,6 +38,7 @@ class CCXTBroker(BaseBroker):
         self.exchange: Optional[Any] = None
         self._api_key: Optional[str] = None
         self._api_secret: Optional[str] = None
+        self._environment: str = "sandbox"
 
     async def connect(self, credentials: Dict[str, str]) -> bool:
         """Connect to the exchange with API credentials.
@@ -52,6 +53,7 @@ class CCXTBroker(BaseBroker):
             api_key = credentials.get("api_key")
             api_secret = credentials.get("api_secret")
             sandbox = credentials.get("sandbox", "true").lower() == "true"
+            self._environment = "sandbox" if sandbox else "live"
 
             if not api_key or not api_secret:
                 logger.error(f"Missing API credentials for {self.exchange_id}")
