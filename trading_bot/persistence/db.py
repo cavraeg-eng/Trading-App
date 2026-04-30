@@ -12,6 +12,50 @@ _local = threading.local()
 _DEFAULT_DB_PATH = Path("./data/trading_bot.db")
 
 
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> list[str]:
+    return [row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()]
+
+
+def _ensure_trade_ledger_schema(conn: sqlite3.Connection) -> None:
+    ledger_cols = _table_columns(conn, "trade_ledger_entries")
+    if not ledger_cols:
+        return
+
+    ledger_migrations = {
+        "signal_id": "ALTER TABLE trade_ledger_entries ADD COLUMN signal_id TEXT",
+        "max_favorable_price": "ALTER TABLE trade_ledger_entries ADD COLUMN max_favorable_price REAL",
+        "max_adverse_price": "ALTER TABLE trade_ledger_entries ADD COLUMN max_adverse_price REAL",
+        "mfe": "ALTER TABLE trade_ledger_entries ADD COLUMN mfe REAL",
+        "mae": "ALTER TABLE trade_ledger_entries ADD COLUMN mae REAL",
+        "r_multiple": "ALTER TABLE trade_ledger_entries ADD COLUMN r_multiple REAL",
+        "outcome": "ALTER TABLE trade_ledger_entries ADD COLUMN outcome TEXT",
+    }
+    for col, sql in ledger_migrations.items():
+        if col not in ledger_cols:
+            conn.execute(sql)
+
+    conn.execute(
+        """DELETE FROM trade_ledger_entries
+        WHERE rowid NOT IN (
+            SELECT MAX(rowid)
+            FROM trade_ledger_entries
+            GROUP BY broker_id, source_type, source_id
+        )"""
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_trade_ledger_unique_source "
+        "ON trade_ledger_entries(broker_id, source_type, source_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_trade_ledger_broker_symbol "
+        "ON trade_ledger_entries(broker_id, symbol, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_trade_ledger_status "
+        "ON trade_ledger_entries(status, updated_at DESC)"
+    )
+
+
 def init_db(path: Path) -> None:
     """Set the global DB path and ensure schema exists."""
     global _db_path
@@ -23,10 +67,10 @@ def init_db(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
     conn.executescript(SCHEMA_SQL)
-    cols = [row[1] for row in conn.execute("PRAGMA table_info(paper_orders)").fetchall()]
+    cols = _table_columns(conn, "paper_orders")
     if "strategy_id" not in cols:
         conn.execute("ALTER TABLE paper_orders ADD COLUMN strategy_id TEXT")
-    copy_trade_cols = [row[1] for row in conn.execute("PRAGMA table_info(copy_trades)").fetchall()]
+    copy_trade_cols = _table_columns(conn, "copy_trades")
     if copy_trade_cols and "signal_id" not in copy_trade_cols:
         conn.execute("ALTER TABLE copy_trades ADD COLUMN signal_id TEXT REFERENCES signal_predictions(signal_id)")
     copy_trade_migrations = {
@@ -79,61 +123,7 @@ def init_db(path: Path) -> None:
         "CREATE INDEX IF NOT EXISTS idx_copy_trades_closed_at "
         "ON copy_trades(closed_at DESC)"
     )
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS trade_ledger_entries (
-            ledger_id        TEXT PRIMARY KEY,
-            broker_id        TEXT NOT NULL,
-            source_type      TEXT NOT NULL,
-            source_id        TEXT NOT NULL,
-            signal_id        TEXT,
-            symbol           TEXT NOT NULL,
-            side             TEXT NOT NULL,
-            status           TEXT NOT NULL,
-            quantity         REAL NOT NULL DEFAULT 0.0,
-            remaining_quantity REAL,
-            entry_price      REAL,
-            current_price    REAL,
-            exit_price       REAL,
-            stop_loss        REAL,
-            take_profit_1    REAL,
-            take_profit_2    REAL,
-            take_profit_3    REAL,
-            unrealized_pnl   REAL NOT NULL DEFAULT 0.0,
-            realized_pnl     REAL NOT NULL DEFAULT 0.0,
-            max_favorable_price REAL,
-            max_adverse_price REAL,
-            mfe              REAL,
-            mae              REAL,
-            r_multiple       REAL,
-            outcome          TEXT,
-            opened_at        TEXT,
-            closed_at        TEXT,
-            updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
-            metadata_json    TEXT,
-            UNIQUE (broker_id, source_type, source_id)
-        )"""
-    )
-    ledger_cols = [row[1] for row in conn.execute("PRAGMA table_info(trade_ledger_entries)").fetchall()]
-    ledger_migrations = {
-        "signal_id": "ALTER TABLE trade_ledger_entries ADD COLUMN signal_id TEXT",
-        "max_favorable_price": "ALTER TABLE trade_ledger_entries ADD COLUMN max_favorable_price REAL",
-        "max_adverse_price": "ALTER TABLE trade_ledger_entries ADD COLUMN max_adverse_price REAL",
-        "mfe": "ALTER TABLE trade_ledger_entries ADD COLUMN mfe REAL",
-        "mae": "ALTER TABLE trade_ledger_entries ADD COLUMN mae REAL",
-        "r_multiple": "ALTER TABLE trade_ledger_entries ADD COLUMN r_multiple REAL",
-        "outcome": "ALTER TABLE trade_ledger_entries ADD COLUMN outcome TEXT",
-    }
-    for col, sql in ledger_migrations.items():
-        if ledger_cols and col not in ledger_cols:
-            conn.execute(sql)
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_trade_ledger_broker_symbol "
-        "ON trade_ledger_entries(broker_id, symbol, updated_at DESC)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_trade_ledger_status "
-        "ON trade_ledger_entries(status, updated_at DESC)"
-    )
+    _ensure_trade_ledger_schema(conn)
     conn.commit()
     conn.close()
 

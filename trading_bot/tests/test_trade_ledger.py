@@ -1,3 +1,5 @@
+import sqlite3
+
 from fastapi.testclient import TestClient
 
 from trading_bot.api.server import app
@@ -128,3 +130,63 @@ def test_trade_ledger_metrics_include_outcomes(tmp_path):
     assert metrics["win_rate"] == 100.0
     assert metrics["avg_r_multiple"] == 2.0
     assert metrics["by_symbol"][0]["symbol"] == "XAU/USD"
+
+
+def test_trade_ledger_migrates_legacy_table_for_idempotent_upsert(tmp_path):
+    db_path = tmp_path / "legacy_ledger.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE trade_ledger_entries (
+            ledger_id TEXT PRIMARY KEY,
+            broker_id TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            side TEXT NOT NULL,
+            status TEXT NOT NULL,
+            quantity REAL NOT NULL DEFAULT 0.0,
+            remaining_quantity REAL,
+            entry_price REAL,
+            current_price REAL,
+            exit_price REAL,
+            stop_loss REAL,
+            take_profit_1 REAL,
+            take_profit_2 REAL,
+            take_profit_3 REAL,
+            unrealized_pnl REAL NOT NULL DEFAULT 0.0,
+            realized_pnl REAL NOT NULL DEFAULT 0.0,
+            opened_at TEXT,
+            closed_at TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            metadata_json TEXT
+        )"""
+    )
+    conn.execute(
+        """INSERT INTO trade_ledger_entries
+        (ledger_id, broker_id, source_type, source_id, symbol, side, status, quantity)
+        VALUES ('old-1', 'oanda', 'order', '123', 'XAU/USD', 'buy', 'pending', 1.0)"""
+    )
+    conn.commit()
+    conn.close()
+
+    init_db(db_path)
+    ledger_id = repo.upsert_trade_ledger_entry({
+        "broker_id": "oanda",
+        "source_type": "order",
+        "source_id": "123",
+        "signal_id": "signal-legacy",
+        "symbol": "XAU/USD",
+        "side": "buy",
+        "status": "filled",
+        "quantity": 1.0,
+        "entry_price": 4700.0,
+        "r_multiple": 1.5,
+    })
+
+    entries = repo.get_trade_ledger_entries(broker_id="oanda", symbol="XAU/USD")
+
+    assert ledger_id == "old-1"
+    assert len(entries) == 1
+    assert entries[0]["status"] == "filled"
+    assert entries[0]["signal_id"] == "signal-legacy"
+    assert entries[0]["r_multiple"] == 1.5
