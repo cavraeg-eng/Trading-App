@@ -40,7 +40,7 @@ class SourceTestResult:
 
 
 def _fmt_price(p: Optional[float]) -> str:
-    return f"${p:,.2f}" if p else "N/A"
+    return f"${p:,.2f}" if p is not None else "N/A"
 
 
 def _fmt_ms(ms: float) -> str:

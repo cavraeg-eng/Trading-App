@@ -21,6 +21,7 @@ Run individual sections when iterating:
 python release_validate.py --security
 python release_validate.py --backend
 python release_validate.py --backend --full-backend
+python release_validate.py --full-backend
 python release_validate.py --frontend
 python release_validate.py --smoke
 ```

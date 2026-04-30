@@ -2,6 +2,7 @@
 
 import time
 from contextlib import asynccontextmanager
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -15,8 +16,8 @@ from trading_bot.services.automation_worker import start_worker, stop_worker
 # Track start time for uptime calculation
 start_time = time.time()
 
-# Default DB path (can be overridden via settings)
-_DEFAULT_DB_PATH = Path("./data/trading_bot.db")
+def get_api_db_path() -> Path:
+    return Path(os.getenv("TRADING_BOT_DB_PATH", "./data/trading_bot.db"))
 
 
 @asynccontextmanager
@@ -24,8 +25,9 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup
     print("Trading Bot API starting...")
-    init_db(_DEFAULT_DB_PATH)
-    print(f"SQLite database initialized at {_DEFAULT_DB_PATH.resolve()}")
+    db_path = get_api_db_path()
+    init_db(db_path)
+    print(f"SQLite database initialized at {db_path.resolve()}")
     from trading_bot.execution.broker_manager import broker_manager
     await broker_manager.restore_state()
     start_worker()

@@ -161,15 +161,25 @@ def smoke_check() -> CheckResult:
             ("GET", "/api/broker/active", {200}),
         ]
         with tempfile.TemporaryDirectory(prefix="release-smoke-") as temp_dir:
-            api_server._DEFAULT_DB_PATH = Path(temp_dir) / "trading_bot.db"
-            with TestClient(api_server.app) as client:
-                failures = []
-                for method, path, expected_statuses in endpoints:
-                    response = client.request(method, path)
-                    if response.status_code not in expected_statuses:
-                        failures.append(f"{method} {path} returned {response.status_code}")
-                    else:
-                        print(f"PASS: {method} {path} -> {response.status_code}")
+            db_path = Path(temp_dir) / "trading_bot.db"
+            previous_db_path = os.environ.get("TRADING_BOT_DB_PATH")
+            try:
+                os.environ["TRADING_BOT_DB_PATH"] = str(db_path)
+                if api_server.get_api_db_path() != db_path:
+                    return CheckResult("API smoke checks", False, "TRADING_BOT_DB_PATH override failed")
+                with TestClient(api_server.app) as client:
+                    failures = []
+                    for method, path, expected_statuses in endpoints:
+                        response = client.request(method, path)
+                        if response.status_code not in expected_statuses:
+                            failures.append(f"{method} {path} returned {response.status_code}")
+                        else:
+                            print(f"PASS: {method} {path} -> {response.status_code}")
+            finally:
+                if previous_db_path is None:
+                    os.environ.pop("TRADING_BOT_DB_PATH", None)
+                else:
+                    os.environ["TRADING_BOT_DB_PATH"] = previous_db_path
         if failures:
             for failure in failures:
                 print(f"FAIL: {failure}")
@@ -216,12 +226,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     os.environ.setdefault("TRADING_MODE", "paper")
     args = parse_args()
-    selected = args.backend or args.frontend or args.security or args.smoke
+    selected = args.backend or args.full_backend or args.frontend or args.security or args.smoke
 
     results: list[CheckResult] = []
     if args.security or not selected:
         results.append(security_check())
-    if args.backend or not selected:
+    if args.backend or args.full_backend or not selected:
         results.append(backend_check(args.full_backend))
     if args.frontend or not selected:
         results.append(frontend_check())
