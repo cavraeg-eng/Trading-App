@@ -38,8 +38,12 @@ class FakeOandaClient:
         path = "/" + url.split("/v3/", 1)[1]
         self.requests.append({"method": method, "path": path, "params": params, "json": json})
         response = self.responses[(method, path)]
+        if isinstance(response, list):
+            response = response.pop(0)
         if callable(response):
             response = response(self.requests[-1])
+        if isinstance(response, Exception):
+            raise response
         return response
 
     async def aclose(self):
@@ -208,6 +212,50 @@ def test_cancel_order_returns_true_and_invalidates_cache():
     assert run_async(broker.cancel_order("order-1")) is True
     assert broker._cache_get("positions") is _MISS
     assert client.requests[0]["path"] == "/accounts/account-1/orders/order-1/cancel"
+
+
+def test_cancel_order_does_not_retry_after_transport_error():
+    client = FakeOandaClient(
+        {
+            ("PUT", "/accounts/account-1/orders/order-1/cancel"): httpx.TransportError(
+                "connection dropped after cancel"
+            )
+        }
+    )
+    broker = connected_broker(client)
+
+    with pytest.raises(BrokerOperationError):
+        run_async(broker.cancel_order("order-1"))
+
+    assert len(client.requests) == 1
+
+
+def test_stale_refresh_uses_running_loop_task_creation(monkeypatch):
+    created_tasks = []
+
+    def fake_create_task(coro):
+        created_tasks.append(coro)
+
+        class FakeTask:
+            pass
+
+        return FakeTask()
+
+    monkeypatch.setattr(asyncio, "create_task", fake_create_task)
+    broker = connected_broker(FakeOandaClient({}))
+    broker._cache_stale_ttl = 60
+    broker._cache_ttl = 0
+    broker._cache_set("positions", ["stale-position"])
+    broker._cache_set("balance", "stale-balance")
+
+    positions = run_async(broker.get_positions())
+    balance = run_async(broker.get_balance())
+
+    assert positions == ["stale-position"]
+    assert balance == "stale-balance"
+    assert len(created_tasks) == 2
+    for coro in created_tasks:
+        coro.close()
 
 
 def test_oanda_error_details_are_redacted():

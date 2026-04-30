@@ -630,6 +630,7 @@ class OANDABroker(BaseBroker):
             "PUT",
             f"/accounts/{self._account_id}/orders/{order_id}/cancel",
             operation="order cancellation",
+            retry_safe=False,
         )
         logger.info("Order cancelled on OANDA", order_id=order_id)
         self._cache_invalidate()
@@ -677,7 +678,7 @@ class OANDABroker(BaseBroker):
         stale = self._cache_get_stale("positions")
         if stale is not _MISS and "positions" not in self._cache_refreshing:
             self._cache_refreshing.add("positions")
-            asyncio.get_event_loop().create_task(self._refresh_positions())
+            asyncio.create_task(self._refresh_positions())
             return stale
 
         positions = await self._fetch_positions_from_oanda()
@@ -721,7 +722,7 @@ class OANDABroker(BaseBroker):
         stale = self._cache_get_stale("balance")
         if stale is not _MISS and "balance" not in self._cache_refreshing:
             self._cache_refreshing.add("balance")
-            asyncio.get_event_loop().create_task(self._refresh_balance())
+            asyncio.create_task(self._refresh_balance())
             return stale
 
         balance = await self._fetch_balance_from_oanda()
@@ -905,7 +906,11 @@ class OANDABroker(BaseBroker):
             stop_loss=self._extract_price(order, "stopLossOnFill", "stopLossOrder", "stopLoss"),
             take_profit_1=self._extract_price(order, "takeProfitOnFill", "takeProfitOrder", "takeProfit"),
             created_at=self._parse_timestamp(order.get("createTime")),
-            updated_at=self._parse_timestamp(order.get("createTime")),
+            updated_at=self._parse_timestamp(
+                order.get("filledTime")
+                or order.get("cancelledTime")
+                or order.get("createTime")
+            ),
             broker_id=self.broker_id,
             metadata=order,
         )
