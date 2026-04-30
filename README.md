@@ -314,6 +314,16 @@ pytest trading_bot/tests/test_risk.py
 pytest --cov=trading_bot --cov-report=html
 ```
 
+### Release Validation
+
+Before release, run the consolidated validation checklist:
+
+```bash
+python release_validate.py
+```
+
+This checks secret/artifact hygiene, targeted backend broker and trade-ledger tests, the frontend build, and read-only API smoke routes. See `RELEASE_VALIDATION.md` for the full checklist, manual UI smoke notes, and release note template.
+
 ## Safety & Risk Warnings
 
 **IMPORTANT DISCLAIMERS:**
