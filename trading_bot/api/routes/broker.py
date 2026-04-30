@@ -573,6 +573,8 @@ async def get_trade_ledger(
     broker_id: Optional[str] = Query(None, description="Filter by broker"),
     symbol: Optional[str] = Query(None, description="Filter by symbol"),
     status: Optional[str] = Query(None, description="Filter by ledger status"),
+    side: Optional[str] = Query(None, description="Filter by trade side"),
+    outcome: Optional[str] = Query(None, description="Filter by trade outcome"),
     count: int = Query(100, description="Number of entries to fetch", ge=1, le=500),
 ) -> dict:
     """Get the unified trade ledger reconciled from positions, orders, and history."""
@@ -582,6 +584,8 @@ async def get_trade_ledger(
         broker_id=broker_id,
         symbol=symbol,
         status=status,
+        side=side,
+        outcome=outcome,
         limit=count,
     )
 
@@ -596,6 +600,8 @@ async def export_trade_ledger_csv(
     broker_id: Optional[str] = Query(None, description="Filter by broker"),
     symbol: Optional[str] = Query(None, description="Filter by symbol"),
     status: Optional[str] = Query(None, description="Filter by ledger status"),
+    side: Optional[str] = Query(None, description="Filter by trade side"),
+    outcome: Optional[str] = Query(None, description="Filter by trade outcome"),
     count: int = Query(500, description="Number of entries to export", ge=1, le=2000),
 ) -> StreamingResponse:
     """Export the unified trade ledger as CSV."""
@@ -604,6 +610,8 @@ async def export_trade_ledger_csv(
         broker_id=broker_id,
         symbol=symbol,
         status=status,
+        side=side,
+        outcome=outcome,
         limit=count,
     )
     output = io.StringIO()

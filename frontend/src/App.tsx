@@ -246,7 +246,7 @@ function App() {
     { id: 'backtest' as Tab, label: 'Backtest', icon: LineChart },
     { id: 'live' as Tab, label: 'Live Trading', icon: Play },
     { id: 'automation' as Tab, label: 'Automation', icon: Bot },
-    { id: 'live-journal' as Tab, label: 'Live Journal', icon: WalletCards },
+    { id: 'live-journal' as Tab, label: 'Trade Journal', icon: WalletCards },
     { id: 'journal' as Tab, label: 'Copy Journal', icon: BookText },
     { id: 'social' as Tab, label: 'Social', icon: Users },
     { id: 'settings' as Tab, label: 'Settings', icon: Settings },
