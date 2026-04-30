@@ -9,6 +9,7 @@ from trading_bot.config import get_logger
 from trading_bot.execution.broker_base import (
     BaseBroker,
     BrokerBalance,
+    BrokerCapabilities,
     BrokerOrder,
     BrokerPosition,
     OrderSide,
@@ -30,6 +31,12 @@ class AlpacaBroker(BaseBroker):
             broker_type="alpaca",
         )
         self.supported_markets = ["stocks", "crypto"]
+        self.required_credentials = ["api_key", "api_secret"]
+        self.supported_environments = ["paper", "live"]
+        self.capabilities = BrokerCapabilities(
+            order_history=True,
+            close_position=True,
+        )
         self._client: Optional[httpx.AsyncClient] = None
         self._api_key: Optional[str] = None
         self._api_secret: Optional[str] = None

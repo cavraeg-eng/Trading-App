@@ -136,7 +136,18 @@ async def _automation_loop() -> None:
                 continue
 
             if _worker_mode == "live" and _worker_broker_id:
-                broker_positions = await broker_manager.get_positions(_worker_broker_id)
+                try:
+                    broker_positions = await broker_manager.get_positions(_worker_broker_id)
+                except BrokerOperationError as exc:
+                    repo.insert_automation_execution(active_id, strategy["symbol"], "analyze", "error", {
+                        "reason": "broker_positions_failed",
+                        "detail": exc.detail,
+                        "category": exc.category,
+                    })
+                    _worker_status["lastError"] = exc.detail
+                    _worker_status["lastRun"] = time.time()
+                    await asyncio.sleep(5)
+                    continue
                 open_positions = [p for p in broker_positions if p.symbol == strategy["symbol"]]
             else:
                 broker_positions = []
@@ -234,7 +245,18 @@ async def _automation_loop() -> None:
             # Branch on mode: live broker vs paper
             if _worker_mode == "live" and _worker_broker_id:
                 # Live mode: use real broker balance and place real order
-                balance_obj = await broker_manager.get_balance(_worker_broker_id)
+                try:
+                    balance_obj = await broker_manager.get_balance(_worker_broker_id)
+                except BrokerOperationError as exc:
+                    repo.insert_automation_execution(active_id, symbol, "execute", "error", {
+                        "reason": "broker_balance_failed",
+                        "detail": exc.detail,
+                        "category": exc.category,
+                    })
+                    _worker_status["lastError"] = exc.detail
+                    _worker_status["lastRun"] = time.time()
+                    await asyncio.sleep(5)
+                    continue
                 account_balance = balance_obj.available_margin if balance_obj else 0.0
                 if account_balance <= 0:
                     repo.insert_automation_execution(active_id, symbol, "execute", "skipped", {"reason": "no_broker_balance"})

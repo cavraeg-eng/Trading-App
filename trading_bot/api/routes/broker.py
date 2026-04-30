@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from trading_bot.api.models import BrokerInfo, OrderRequest
+from trading_bot.api.models import OrderRequest
 from trading_bot.execution.broker_base import OrderSide, OrderType
 from trading_bot.execution.broker_manager import BrokerOperationError, broker_manager
 from trading_bot.persistence import repositories as repo
@@ -40,6 +40,20 @@ class ModifyTradeRequest(BaseModel):
     """Request to modify SL/TP on an open trade."""
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
+
+
+async def _safe_refresh_broker_ledger(
+    broker_id: str,
+    symbol: Optional[str],
+    count: int,
+) -> bool:
+    try:
+        await broker_manager.get_positions(broker_id)
+        await broker_manager.get_orders(broker_id, count=count, symbol=symbol)
+        await broker_manager.get_trade_history(broker_id, count=count, symbol=symbol)
+        return True
+    except BrokerOperationError:
+        return False
 
 
 def _serialize_order(order) -> dict:
@@ -75,26 +89,16 @@ async def _refresh_trade_ledger_sources(
     if broker_id:
         status_info = broker_manager.get_broker_status(broker_id)
         if status_info["exists"] and status_info["connected"]:
-            connected_brokers.append(broker_id)
-            await broker_manager.get_positions(broker_id)
-            await broker_manager.get_orders(broker_id, count=count, symbol=symbol)
-            try:
-                await broker_manager.get_trade_history(broker_id, count=count, symbol=symbol)
-            except Exception:
-                pass
+            if await _safe_refresh_broker_ledger(broker_id, symbol, count):
+                connected_brokers.append(broker_id)
         return connected_brokers
 
     for broker_info in broker_manager.list_brokers():
         if not broker_info["connected"]:
             continue
         current_broker_id = broker_info["id"]
-        connected_brokers.append(current_broker_id)
-        await broker_manager.get_positions(current_broker_id)
-        await broker_manager.get_orders(current_broker_id, count=count, symbol=symbol)
-        try:
-            await broker_manager.get_trade_history(current_broker_id, count=count, symbol=symbol)
-        except Exception:
-            pass
+        if await _safe_refresh_broker_ledger(current_broker_id, symbol, count):
+            connected_brokers.append(current_broker_id)
     return connected_brokers
 
 
@@ -111,6 +115,10 @@ def _ledger_summary(entries: List[dict], connected_brokers: List[str]) -> dict:
     }
 
 
+def _raise_broker_error(exc: BrokerOperationError) -> None:
+    raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+
 @router.get("/list")
 async def get_broker_list() -> List[dict]:
     """Get list of available brokers."""
@@ -120,50 +128,16 @@ async def get_broker_list() -> List[dict]:
 @router.post("/connect/{broker_id}", response_model=ConnectResponse)
 async def connect_broker(broker_id: str, request: ConnectRequest) -> dict:
     """Connect to a broker with credentials."""
-    # Build credentials dict based on broker type
-    credentials: Dict[str, str] = {}
+    credentials: Dict[str, Any] = {
+        key: value
+        for key, value in request.model_dump().items()
+        if value is not None and value != ""
+    }
 
-    if broker_id in ["binance", "bybit", "okx", "kraken"]:
-        # CCXT brokers need api_key and api_secret
-        if not request.api_key or not request.api_secret:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Broker '{broker_id}' requires api_key and api_secret"
-            )
-        credentials = {
-            "api_key": request.api_key,
-            "api_secret": request.api_secret,
-            "sandbox": "true" if request.environment in ["sandbox", "practice", "paper"] else "false"
-        }
-    elif broker_id == "oanda":
-        # OANDA needs api_token and account_id
-        if not request.api_token or not request.account_id:
-            raise HTTPException(
-                status_code=400,
-                detail="OANDA requires api_token and account_id"
-            )
-        credentials = {
-            "api_token": request.api_token,
-            "account_id": request.account_id,
-            "environment": request.environment if request.environment in ["practice", "live"] else "practice"
-        }
-    elif broker_id == "alpaca":
-        # Alpaca needs api_key and api_secret
-        if not request.api_key or not request.api_secret:
-            raise HTTPException(
-                status_code=400,
-                detail="Alpaca requires api_key and api_secret"
-            )
-        credentials = {
-            "api_key": request.api_key,
-            "api_secret": request.api_secret,
-            "environment": request.environment if request.environment in ["paper", "live"] else "paper"
-        }
-    else:
-        raise HTTPException(status_code=404, detail=f"Broker '{broker_id}' not found")
-
-    # Attempt connection
-    success = await broker_manager.connect(broker_id, credentials)
+    try:
+        success = await broker_manager.connect(broker_id, credentials)
+    except BrokerOperationError as exc:
+        _raise_broker_error(exc)
 
     if success:
         return {
@@ -182,7 +156,10 @@ async def connect_broker(broker_id: str, request: ConnectRequest) -> dict:
 @router.post("/disconnect/{broker_id}")
 async def disconnect_broker(broker_id: str) -> dict:
     """Disconnect from a broker."""
-    success = await broker_manager.disconnect(broker_id)
+    try:
+        success = await broker_manager.disconnect(broker_id)
+    except BrokerOperationError as exc:
+        _raise_broker_error(exc)
 
     return {
         "status": "disconnected" if success else "error",
@@ -216,19 +193,16 @@ async def get_broker_status(broker_id: str) -> dict:
 @router.get("/active")
 async def get_active_broker() -> Optional[dict]:
     """Get the currently active broker."""
-    active = broker_manager.get_active_broker()
-    if active:
-        return active.get_info()
-    return None
+    return broker_manager.get_active_broker_info()
 
 
 @router.post("/active/{broker_id}")
 async def set_active_broker(broker_id: str) -> dict:
     """Set the active broker."""
-    success = broker_manager.set_active_broker(broker_id)
-
-    if not success:
-        raise HTTPException(status_code=404, detail=f"Broker '{broker_id}' not found")
+    try:
+        broker_manager.set_active_broker(broker_id)
+    except BrokerOperationError as exc:
+        _raise_broker_error(exc)
 
     return {
         "status": "success",
@@ -296,7 +270,7 @@ async def place_order(order: OrderRequest) -> dict:
                 "metadata": {"event": "signal_linked_order", "order_id": broker_order.order_id},
             })
     except BrokerOperationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+        _raise_broker_error(exc)
 
     return {
         "success": True,
@@ -325,7 +299,10 @@ async def get_positions(
 
     # If broker_id specified, get positions from that broker
     if broker_id:
-        broker_positions = await broker_manager.get_positions(broker_id)
+        try:
+            broker_positions = await broker_manager.get_positions(broker_id)
+        except BrokerOperationError as exc:
+            _raise_broker_error(exc)
         for pos in broker_positions:
             if symbol and pos.symbol != symbol:
                 continue
@@ -348,7 +325,10 @@ async def get_positions(
         # Get positions from all connected brokers
         for broker_info in broker_manager.list_brokers():
             if broker_info["connected"]:
-                broker_positions = await broker_manager.get_positions(broker_info["id"])
+                try:
+                    broker_positions = await broker_manager.get_positions(broker_info["id"])
+                except BrokerOperationError:
+                    continue
                 for pos in broker_positions:
                     if symbol and pos.symbol != symbol:
                         continue
@@ -384,23 +364,31 @@ async def get_orders(
 
     if broker_id:
         status_info = broker_manager.get_broker_status(broker_id)
+        if not status_info["exists"]:
+            raise HTTPException(status_code=404, detail=f"Broker '{broker_id}' not found")
         if status_info["connected"]:
-            broker_orders = await broker_manager.get_orders(
-                broker_id,
-                count=count,
-                symbol=symbol,
-                status=status,
-            )
-            orders.extend(_serialize_order(order) for order in broker_orders)
-    else:
-        for broker_info in broker_manager.list_brokers():
-            if broker_info["connected"]:
+            try:
                 broker_orders = await broker_manager.get_orders(
-                    broker_info["id"],
+                    broker_id,
                     count=count,
                     symbol=symbol,
                     status=status,
                 )
+            except BrokerOperationError as exc:
+                _raise_broker_error(exc)
+            orders.extend(_serialize_order(order) for order in broker_orders)
+    else:
+        for broker_info in broker_manager.list_brokers():
+            if broker_info["connected"]:
+                try:
+                    broker_orders = await broker_manager.get_orders(
+                        broker_info["id"],
+                        count=count,
+                        symbol=symbol,
+                        status=status,
+                    )
+                except BrokerOperationError:
+                    continue
                 orders.extend(_serialize_order(order) for order in broker_orders)
 
     return orders
@@ -421,7 +409,10 @@ async def get_balance(broker_id: str) -> dict:
             "balances": []
         }
 
-    balance = await broker_manager.get_balance(broker_id)
+    try:
+        balance = await broker_manager.get_balance(broker_id)
+    except BrokerOperationError as exc:
+        _raise_broker_error(exc)
 
     if not balance:
         # Return unavailable state instead of mock data
@@ -452,7 +443,10 @@ async def get_balance(broker_id: str) -> dict:
 @router.delete("/order/{broker_id}/{order_id}")
 async def cancel_order_endpoint(broker_id: str, order_id: str) -> dict:
     """Cancel an order."""
-    success = await broker_manager.cancel_order(broker_id, order_id)
+    try:
+        success = await broker_manager.cancel_order(broker_id, order_id)
+    except BrokerOperationError as exc:
+        _raise_broker_error(exc)
 
     if success:
         return {
@@ -477,11 +471,14 @@ async def close_position(
     if not status["connected"]:
         raise HTTPException(status_code=400, detail=f"Broker '{broker_id}' is not connected")
 
-    success = await broker_manager.close_position(
-        broker_id,
-        symbol,
-        position_id=position_id,
-    )
+    try:
+        success = await broker_manager.close_position(
+            broker_id,
+            symbol,
+            position_id=position_id,
+        )
+    except BrokerOperationError as exc:
+        _raise_broker_error(exc)
     if success:
         message = (
             f"Position {position_id} closed for {symbol}"
@@ -523,7 +520,7 @@ async def modify_trade_endpoint(
             take_profit=body.take_profit,
         )
     except BrokerOperationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+        _raise_broker_error(exc)
 
     if success:
         return {
@@ -549,14 +546,22 @@ async def get_trade_history(
 
     if broker_id:
         status_info = broker_manager.get_broker_status(broker_id)
+        if not status_info["exists"]:
+            raise HTTPException(status_code=404, detail=f"Broker '{broker_id}' not found")
         if status_info["connected"]:
-            trades = await broker_manager.get_trade_history(broker_id, count=count, symbol=symbol)
+            try:
+                trades = await broker_manager.get_trade_history(broker_id, count=count, symbol=symbol)
+            except BrokerOperationError as exc:
+                _raise_broker_error(exc)
     else:
         for broker_info in broker_manager.list_brokers():
             if broker_info["connected"]:
-                history = await broker_manager.get_trade_history(
-                    broker_info["id"], count=count, symbol=symbol
-                )
+                try:
+                    history = await broker_manager.get_trade_history(
+                        broker_info["id"], count=count, symbol=symbol
+                    )
+                except BrokerOperationError:
+                    continue
                 trades.extend(history)
 
     return trades

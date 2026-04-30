@@ -11,6 +11,7 @@ from trading_bot.config import get_logger
 from trading_bot.execution.broker_base import (
     BaseBroker,
     BrokerBalance,
+    BrokerCapabilities,
     BrokerOrder,
     BrokerPosition,
     OrderSide,
@@ -35,6 +36,15 @@ class OANDABroker(BaseBroker):
             broker_type="oanda",
         )
         self.supported_markets = ["forex", "cfds"]
+        self.required_credentials = ["api_token", "account_id"]
+        self.supported_environments = ["practice", "live"]
+        self.capabilities = BrokerCapabilities(
+            bracket_orders=True,
+            order_history=True,
+            trade_history=True,
+            close_position=True,
+            modify_trade=True,
+        )
         self._client: Optional[httpx.AsyncClient] = None
         self._api_token: Optional[str] = None
         self._account_id: Optional[str] = None

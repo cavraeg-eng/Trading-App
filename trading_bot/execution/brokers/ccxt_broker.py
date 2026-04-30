@@ -9,6 +9,7 @@ from trading_bot.config import get_logger
 from trading_bot.execution.broker_base import (
     BaseBroker,
     BrokerBalance,
+    BrokerCapabilities,
     BrokerOrder,
     BrokerPosition,
     OrderSide,
@@ -35,10 +36,24 @@ class CCXTBroker(BaseBroker):
         )
         self.exchange_id = exchange_id
         self.supported_markets = ["crypto", "futures"]
+        self.required_credentials = ["api_key", "api_secret"]
+        self.supported_environments = ["sandbox", "live"]
+        self.capabilities = BrokerCapabilities(
+            stop_orders=True,
+            order_history=True,
+            close_position=True,
+        )
         self.exchange: Optional[Any] = None
         self._api_key: Optional[str] = None
         self._api_secret: Optional[str] = None
         self._environment: str = "sandbox"
+
+    def prepare_credentials(self, credentials: Dict[str, Any]) -> Dict[str, str]:
+        """Validate credentials and convert environment into CCXT sandbox mode."""
+        prepared = super().prepare_credentials(credentials)
+        environment = prepared.pop("environment", "sandbox")
+        prepared["sandbox"] = "true" if environment in {"sandbox", "practice", "paper"} else "false"
+        return prepared
 
     async def connect(self, credentials: Dict[str, str]) -> bool:
         """Connect to the exchange with API credentials.
