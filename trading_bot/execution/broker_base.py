@@ -30,6 +30,64 @@ class OrderStatus(str, Enum):
     REJECTED = "rejected"
 
 
+@dataclass(frozen=True)
+class BrokerCapabilities:
+    """Feature flags exposed by broker adapters."""
+    market_orders: bool = True
+    limit_orders: bool = True
+    stop_orders: bool = False
+    bracket_orders: bool = False
+    cancel_orders: bool = True
+    positions: bool = True
+    balances: bool = True
+    order_status: bool = True
+    order_history: bool = False
+    trade_history: bool = False
+    close_position: bool = True
+    modify_trade: bool = False
+    quotes: bool = False
+
+    def as_dict(self) -> Dict[str, bool]:
+        """Return capabilities as a serializable dictionary."""
+        return {
+            "market_orders": self.market_orders,
+            "limit_orders": self.limit_orders,
+            "stop_orders": self.stop_orders,
+            "bracket_orders": self.bracket_orders,
+            "cancel_orders": self.cancel_orders,
+            "positions": self.positions,
+            "balances": self.balances,
+            "order_status": self.order_status,
+            "order_history": self.order_history,
+            "trade_history": self.trade_history,
+            "close_position": self.close_position,
+            "modify_trade": self.modify_trade,
+            "quotes": self.quotes,
+        }
+
+
+class BrokerConfigurationError(Exception):
+    """Raised when broker configuration or credentials are invalid."""
+
+    def __init__(self, detail: str, category: str = "configuration_error", status_code: int = 400):
+        self.detail = detail
+        self.category = category
+        self.status_code = status_code
+        super().__init__(detail)
+
+
+class BrokerCapabilityError(Exception):
+    """Raised when a broker does not support a requested capability."""
+
+    def __init__(self, broker_id: str, capability: str):
+        self.broker_id = broker_id
+        self.capability = capability
+        self.detail = f"Broker '{broker_id}' does not support capability '{capability}'"
+        self.category = "unsupported_capability"
+        self.status_code = 501
+        super().__init__(self.detail)
+
+
 @dataclass
 class BrokerOrder:
     """Broker order data class."""
@@ -76,6 +134,17 @@ class BrokerBalance:
     currency: str = "USD"
 
 
+@dataclass
+class BrokerQuote:
+    """Broker quote data class."""
+    symbol: str
+    bid: Optional[float] = None
+    ask: Optional[float] = None
+    last: Optional[float] = None
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+    broker_id: str = ""
+
+
 class BaseBroker(ABC):
     """Abstract base class for broker integrations."""
 
@@ -85,6 +154,58 @@ class BaseBroker(ABC):
         self.broker_type = broker_type
         self.connected = False
         self.supported_markets: List[str] = []
+        self.required_credentials: List[str] = []
+        self.supported_environments: List[str] = []
+        self.capabilities = BrokerCapabilities()
+
+    def prepare_credentials(self, credentials: Dict[str, Any]) -> Dict[str, str]:
+        """Validate and normalize connection credentials for this broker."""
+        missing = [
+            field_name
+            for field_name in self.required_credentials
+            if not credentials.get(field_name)
+        ]
+        if missing:
+            raise BrokerConfigurationError(
+                detail=(
+                    f"Broker '{self.broker_id}' requires "
+                    f"{', '.join(missing)}"
+                ),
+                category="missing_credentials",
+            )
+
+        prepared = {
+            field_name: str(credentials[field_name])
+            for field_name in self.required_credentials
+        }
+
+        if self.supported_environments:
+            requested_environment = str(
+                credentials.get("environment") or self.supported_environments[0]
+            ).lower()
+            environment = (
+                requested_environment
+                if requested_environment in self.supported_environments
+                else self.supported_environments[0]
+            )
+            prepared["environment"] = environment
+
+        return prepared
+
+    def get_connection_schema(self) -> Dict[str, Any]:
+        """Return non-secret connection requirements for clients."""
+        return {
+            "required_credentials": list(self.required_credentials),
+            "supported_environments": list(self.supported_environments),
+        }
+
+    def get_capabilities(self) -> Dict[str, bool]:
+        """Return broker capabilities as safe serializable metadata."""
+        return self.capabilities.as_dict()
+
+    def supports(self, capability: str) -> bool:
+        """Return whether a broker supports a named capability."""
+        return bool(self.get_capabilities().get(capability, False))
 
     @abstractmethod
     async def connect(self, credentials: Dict[str, str]) -> bool:
@@ -191,7 +312,7 @@ class BaseBroker(ABC):
         Returns:
             True if modification was successful
         """
-        raise NotImplementedError("modify_trade not supported by this broker")
+        raise BrokerCapabilityError(self.broker_id, "modify_trade")
 
     async def get_trade_history(
         self,
@@ -207,6 +328,10 @@ class BaseBroker(ABC):
         """
         return []
 
+    async def get_quote(self, symbol: str) -> BrokerQuote:
+        """Get the latest quote for a symbol."""
+        raise BrokerCapabilityError(self.broker_id, "quotes")
+
     def get_info(self) -> dict:
         """Get broker information."""
         info = {
@@ -215,6 +340,8 @@ class BaseBroker(ABC):
             "type": self.broker_type,
             "connected": self.connected,
             "supported_markets": self.supported_markets,
+            "capabilities": self.get_capabilities(),
+            "connection_schema": self.get_connection_schema(),
         }
         environment = getattr(self, "_environment", None)
         if environment:
