@@ -159,15 +159,6 @@ async def start_automation_worker(
             {"reason": gate.reason, **gate.detail},
         )
         raise HTTPException(status_code=400, detail={"reason": gate.reason, **gate.detail})
-    # Validate live mode requirements
-    if mode == "live":
-        if not broker_id:
-            raise HTTPException(status_code=400, detail="broker_id is required for live mode")
-        status = broker_manager.get_broker_status(broker_id)
-        if not status["exists"]:
-            raise HTTPException(status_code=404, detail=f"Broker '{broker_id}' not found")
-        if not status["connected"]:
-            raise HTTPException(status_code=400, detail=f"Broker '{broker_id}' is not connected")
     start_worker(mode=mode or "paper", broker_id=broker_id)
     return {"success": True, "worker": get_worker_status()}
 

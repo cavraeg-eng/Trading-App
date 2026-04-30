@@ -188,13 +188,7 @@ async def _automation_loop() -> None:
                 await asyncio.sleep(5)
                 continue
 
-            side = "buy" if "buy" in signal else "sell" if "sell" in signal else None
-            if not side:
-                repo.insert_automation_execution(active_id, symbol, "analyze", "skipped", {"reason": "unsupported_signal", "signal": signal})
-                _worker_status["lastRun"] = time.time()
-                await asyncio.sleep(5)
-                continue
-
+            side = signal_quality.detail["side"]
             current_price = float(analysis.get("currentPrice", 0))
 
             signal_key = f"{active_id}:{symbol}:{trade_style}:{signal}:{round(current_price, 2)}"
