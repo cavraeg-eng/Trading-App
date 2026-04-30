@@ -351,6 +351,7 @@ function TradingChart({
 
   const activeLevelLines = useMemo<OverlayLine[]>(() => {
     if (!activePosition) return [];
+    if (latestSignal?.setupStatus === 'active') return [];
     const status = activePosition.status ?? 'active';
     const lines: OverlayLine[] = [];
 
@@ -383,7 +384,7 @@ function TradingChart({
     });
 
     return lines;
-  }, [activePosition]);
+  }, [activePosition, latestSignal?.setupStatus]);
 
   const overlayPriceRange = useMemo(() => {
     const pricePoints: number[] = [];
@@ -621,7 +622,7 @@ function TradingChart({
               className={`absolute left-0 right-0 -translate-y-1/2 ${line.opacityClassName ?? ''}`}
               style={{ top: `${getPriceOffsetPercent(line.value)}%` }}
             >
-              <div className={`w-full border-t ${line.dashed ? 'border-dashed' : 'border-dotted'} ${line.lineClassName}`} />
+              <div className={`w-full border-t ${line.dashed ? 'border-dashed' : 'border-solid'} ${line.lineClassName}`} />
               {/* MT5-style axis label - small solid badge on right edge */}
               <div className="absolute right-0 top-0 -translate-y-1/2">
                 <div className="flex items-center">
