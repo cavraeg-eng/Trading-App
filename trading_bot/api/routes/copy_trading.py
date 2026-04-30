@@ -365,6 +365,21 @@ def _trade_r_multiple(trade: dict) -> Optional[float]:
     return round(float(trade["realized_pnl"]) / total_risk, 2)
 
 
+def _trade_excursion_metrics(trade: dict) -> dict:
+    entry_price = float(trade["entry_price"])
+    max_favorable_price = trade.get("max_favorable_price")
+    max_adverse_price = trade.get("max_adverse_price")
+    if max_favorable_price is None or max_adverse_price is None:
+        return {"mfe": None, "mae": None}
+    if trade["direction"] == "BUY":
+        mfe = max(0.0, float(max_favorable_price) - entry_price)
+        mae = max(0.0, entry_price - float(max_adverse_price))
+    else:
+        mfe = max(0.0, entry_price - float(max_favorable_price))
+        mae = max(0.0, float(max_adverse_price) - entry_price)
+    return {"mfe": round(mfe, 5), "mae": round(mae, 5)}
+
+
 @router.get("/settings")
 async def get_settings():
     return repo.get_copy_settings()
@@ -611,6 +626,14 @@ async def get_stats():
     total_count = open_count + closed_count
     total_unrealized_pnl = sum(float(trade.get("unrealized_pnl", 0.0)) for trade in open_trades)
     partial_exit_trades = sum(1 for trade in open_trades + closed_trades if int(trade.get("partial_exit_count", 0)) > 0)
+    mfe_values = []
+    mae_values = []
+    for trade in closed_trades:
+        metrics = _trade_excursion_metrics(trade)
+        if metrics["mfe"] is not None:
+            mfe_values.append(metrics["mfe"])
+        if metrics["mae"] is not None:
+            mae_values.append(metrics["mae"])
 
     if closed_count == 0:
         return {
@@ -630,6 +653,8 @@ async def get_stats():
             "symbol_breakdown": [],
             "recent_closed": [],
             "equity_curve": [],
+            "avg_mfe": None,
+            "avg_mae": None,
         }
 
     wins = sum(1 for t in closed_trades if t["realized_pnl"] > 0)
@@ -650,6 +675,7 @@ async def get_stats():
             "closed_at": trade.get("closed_at"),
             "holding_seconds": round(float(trade["closed_at"]) - float(trade["created_at"]), 1) if trade.get("closed_at") is not None else None,
             "r_multiple": _trade_r_multiple(trade),
+            **_trade_excursion_metrics(trade),
         }
         for trade in closed_trades[:10]
     ]
@@ -673,6 +699,8 @@ async def get_stats():
         "max_loss_streak": streaks["max_loss_streak"],
         "avg_hold_seconds": round(sum(hold_durations) / len(hold_durations), 1) if hold_durations else 0.0,
         "avg_r_multiple": round(sum(r_values) / len(r_values), 2) if r_values else None,
+        "avg_mfe": round(sum(mfe_values) / len(mfe_values), 5) if mfe_values else None,
+        "avg_mae": round(sum(mae_values) / len(mae_values), 5) if mae_values else None,
         "partial_exit_trades": partial_exit_trades,
         "symbol_breakdown": _build_symbol_breakdown(closed_trades),
         "recent_closed": recent_closed,

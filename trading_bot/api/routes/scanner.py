@@ -55,10 +55,16 @@ async def get_presets():
     """Get built-in scanner presets."""
     presets = [
         {
-            "id": "trendwave",
-            "name": "TrendWave",
-            "description": "Identifies strong trending pairs using EMA crossovers and ADX",
+            "id": "apex_current",
+            "name": "Apex Current",
+            "description": "Tracks mature trend continuation using EMA reclaim, RSI strength, and directional confirmation",
             "icon": "trending-up",
+            "category": "Trend follower",
+            "best_for": "4H swing continuation when price reclaims the EMA with RSI confirmation.",
+            "cadence": "4H",
+            "risk": "medium",
+            "popularity": "Core",
+            "accent": "emerald",
             "logic": "AND",
             "groups": [
                 {
@@ -73,6 +79,7 @@ async def get_presets():
             ],
             "trade_style": "swing",
             "timeframe": "4h",
+            "recommended_pairs": ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "US500"],
             "tags": ["trend", "breakout", "swing"],
             "conditions": [
                 {"indicator": "Price", "operator": "crosses_above", "compare_indicator": "EMA", "value": 0},
@@ -80,10 +87,16 @@ async def get_presets():
             ]
         },
         {
-            "id": "momentum_pro",
-            "name": "MomentumPro",
-            "description": "Finds pairs with strong momentum using RSI and MACD",
+            "id": "viper_entry",
+            "name": "Viper Entry",
+            "description": "Hunts precision pullback entries where oversold momentum flips back into confirmation",
             "icon": "zap",
+            "category": "Precision entry",
+            "best_for": "Fast mean-reversion entries after oversold momentum flips back bullish.",
+            "cadence": "1H",
+            "risk": "medium",
+            "popularity": "Popular",
+            "accent": "amber",
             "logic": "AND",
             "groups": [
                 {
@@ -98,6 +111,7 @@ async def get_presets():
             ],
             "trade_style": "swing",
             "timeframe": "1h",
+            "recommended_pairs": ["EUR/USD", "GBP/USD", "AUD/USD", "XAU/USD", "BTC/USD"],
             "tags": ["momentum", "reversal"],
             "conditions": [
                 {"indicator": "RSI", "operator": "<", "value": 30},
@@ -105,13 +119,20 @@ async def get_presets():
             ]
         },
         {
-            "id": "volatility_break",
-            "name": "VolatilityBreak",
-            "description": "Detects volatility breakouts using Bollinger Bands",
+            "id": "nova_breaker",
+            "name": "Nova Breaker",
+            "description": "Detects high-energy breakouts when price expands beyond volatility bands",
             "icon": "activity",
+            "category": "Breakout hunter",
+            "best_for": "Expansion moves when price pushes outside the upper band with elevated ATR.",
+            "cadence": "1H",
+            "risk": "high",
+            "popularity": "Aggressive",
+            "accent": "rose",
             "logic": "AND",
             "trade_style": "swing",
             "timeframe": "1h",
+            "recommended_pairs": ["XAU/USD", "BTC/USD", "US500", "GBP/JPY", "EUR/JPY"],
             "tags": ["volatility", "breakout"],
             "conditions": [
                 {"indicator": "Price", "operator": "crosses_above", "compare_indicator": "BB Upper", "value": 0},
@@ -119,30 +140,132 @@ async def get_presets():
             ]
         },
         {
-            "id": "volume_spike",
-            "name": "VolumeSpike",
-            "description": "Catches unusual volume activity",
+            "id": "pulse_surge",
+            "name": "Pulse Surge",
+            "description": "Catches unusual participation bursts before short-term momentum accelerates",
             "icon": "bar-chart",
+            "category": "Flow scanner",
+            "best_for": "Short-term alerts when activity surges above the recent 20-period baseline.",
+            "cadence": "15M",
+            "risk": "medium",
+            "popularity": "Intraday",
+            "accent": "sky",
             "logic": "AND",
             "trade_style": "scalp",
             "timeframe": "15m",
+            "recommended_pairs": ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "BTC/USD"],
             "tags": ["volume", "breakout"],
             "conditions": [
                 {"indicator": "Volume", "operator": ">", "value": 2.0}
             ]
         },
         {
-            "id": "mean_reversion",
-            "name": "MeanReversion",
-            "description": "Finds oversold pairs ready to bounce",
+            "id": "gravity_snap",
+            "name": "Gravity Snap",
+            "description": "Finds stretched markets that may snap back after deep oversold pressure",
             "icon": "refresh-cw",
+            "category": "Mean reversion",
+            "best_for": "Pullbacks near the lower Bollinger zone where RSI is deeply oversold.",
+            "cadence": "1H",
+            "risk": "low",
+            "popularity": "Defensive",
+            "accent": "violet",
             "logic": "AND",
             "trade_style": "swing",
             "timeframe": "1h",
+            "recommended_pairs": ["EUR/USD", "AUD/USD", "USD/CAD", "NZD/USD", "XAU/USD"],
             "tags": ["mean reversion", "oversold"],
             "conditions": [
                 {"indicator": "RSI", "operator": "<", "value": 25},
                 {"indicator": "BB", "operator": "<", "value": -1}
+            ]
+        },
+        {
+            "id": "sweep_forge",
+            "name": "Sweep Forge",
+            "description": "Looks for stretched moves with volume confirmation after likely liquidity sweeps",
+            "icon": "target",
+            "category": "Liquidity hunter",
+            "best_for": "Scalp setups where price tags an extreme and participation expands.",
+            "cadence": "5M",
+            "risk": "high",
+            "popularity": "Fast",
+            "accent": "amber",
+            "logic": "AND",
+            "trade_style": "scalp",
+            "timeframe": "5m",
+            "recommended_pairs": ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD"],
+            "tags": ["liquidity", "scalp", "volume"],
+            "conditions": [
+                {"indicator": "RSI", "operator": "<", "value": 35},
+                {"indicator": "Volume", "operator": ">", "value": 1.4},
+                {"indicator": "BB", "operator": "<=", "value": -0.8}
+            ]
+        },
+        {
+            "id": "atlas_pulse",
+            "name": "Atlas Pulse",
+            "description": "Screens larger-market continuation with slower trend and volume agreement",
+            "icon": "shield",
+            "category": "Macro swing",
+            "best_for": "Cleaner swing scans on majors, gold, indices, and crypto using slower confirmation.",
+            "cadence": "1D",
+            "risk": "low",
+            "popularity": "Stable",
+            "accent": "emerald",
+            "logic": "AND",
+            "trade_style": "swing",
+            "timeframe": "1d",
+            "recommended_pairs": ["EUR/USD", "USD/JPY", "XAU/USD", "BTC/USD", "US500"],
+            "tags": ["macro", "trend", "confirmation"],
+            "conditions": [
+                {"indicator": "Price", "operator": ">", "compare_indicator": "EMA", "value": 0},
+                {"indicator": "MACD Histogram", "operator": ">", "value": 0},
+                {"indicator": "Volume", "operator": ">", "value": 1.0}
+            ]
+        },
+        {
+            "id": "aurum_edge",
+            "name": "Aurum Edge",
+            "description": "Gold-focused scalping scanner for fast XAU/USD extremes and participation bursts",
+            "icon": "sparkles",
+            "category": "Gold scalper",
+            "best_for": "XAU/USD 5-minute scalp ideas when gold stretches into volatility extremes.",
+            "cadence": "5M",
+            "risk": "high",
+            "popularity": "Gold",
+            "accent": "amber",
+            "logic": "AND",
+            "trade_style": "scalp",
+            "timeframe": "5m",
+            "recommended_pairs": ["XAU/USD"],
+            "tags": ["gold", "scalp", "volatility"],
+            "conditions": [
+                {"indicator": "RSI", "operator": "between", "value": 20, "value2": 38},
+                {"indicator": "BB", "operator": "<=", "value": -0.7},
+                {"indicator": "Volume", "operator": ">", "value": 1.2}
+            ]
+        },
+        {
+            "id": "volt_raider",
+            "name": "Volt Raider",
+            "description": "Crypto volatility scanner for fast expansions in BTC and high-beta markets",
+            "icon": "bot",
+            "category": "Crypto volatility",
+            "best_for": "Crypto continuation or reversal watchlists during elevated volume and volatility.",
+            "cadence": "15M",
+            "risk": "high",
+            "popularity": "Crypto",
+            "accent": "violet",
+            "logic": "AND",
+            "trade_style": "scalp",
+            "timeframe": "15m",
+            "recommended_pairs": ["BTC/USD", "ETH/USD"],
+            "tags": ["crypto", "momentum", "volatility"],
+            "conditions": [
+                {"indicator": "ATR", "operator": ">", "value": 1.0},
+                {"indicator": "Volume", "operator": ">", "value": 1.3},
+                {"indicator": "MACD Histogram", "operator": ">", "value": 0}
             ]
         },
     ]

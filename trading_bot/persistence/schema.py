@@ -176,4 +176,43 @@ CREATE TABLE IF NOT EXISTS automation_executions (
     detail_json   TEXT,
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Unified trade ledger, reconciled from broker orders, positions, and history.
+CREATE TABLE IF NOT EXISTS trade_ledger_entries (
+    ledger_id        TEXT PRIMARY KEY,
+    broker_id        TEXT NOT NULL,
+    source_type      TEXT NOT NULL,
+    source_id        TEXT NOT NULL,
+    signal_id        TEXT,
+    symbol           TEXT NOT NULL,
+    side             TEXT NOT NULL,
+    status           TEXT NOT NULL,
+    quantity         REAL NOT NULL DEFAULT 0.0,
+    remaining_quantity REAL,
+    entry_price      REAL,
+    current_price    REAL,
+    exit_price       REAL,
+    stop_loss        REAL,
+    take_profit_1    REAL,
+    take_profit_2    REAL,
+    take_profit_3    REAL,
+    unrealized_pnl   REAL NOT NULL DEFAULT 0.0,
+    realized_pnl     REAL NOT NULL DEFAULT 0.0,
+    max_favorable_price REAL,
+    max_adverse_price REAL,
+    mfe              REAL,
+    mae              REAL,
+    r_multiple       REAL,
+    outcome          TEXT,
+    opened_at        TEXT,
+    closed_at        TEXT,
+    updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    metadata_json    TEXT,
+    UNIQUE (broker_id, source_type, source_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_trade_ledger_broker_symbol
+    ON trade_ledger_entries(broker_id, symbol, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trade_ledger_status
+    ON trade_ledger_entries(status, updated_at DESC);
 """

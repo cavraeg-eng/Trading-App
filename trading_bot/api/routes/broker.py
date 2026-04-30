@@ -1,16 +1,20 @@
 """Broker routes for the trading bot API."""
 
+import csv
+import io
 import random
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from trading_bot.api.models import BrokerInfo, OrderRequest
 from trading_bot.execution.broker_base import OrderSide, OrderType
 from trading_bot.execution.broker_manager import BrokerOperationError, broker_manager
+from trading_bot.persistence import repositories as repo
 
 router = APIRouter(prefix="/api/broker", tags=["broker"])
 
@@ -30,6 +34,12 @@ class ConnectResponse(BaseModel):
     broker_id: str
     message: str
     timestamp: str
+
+
+class ModifyTradeRequest(BaseModel):
+    """Request to modify SL/TP on an open trade."""
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
 
 
 def _serialize_order(order) -> dict:
@@ -53,6 +63,51 @@ def _serialize_order(order) -> dict:
         "broker_id": order.broker_id,
         "created_at": created_at,
         "updated_at": updated_at,
+    }
+
+
+async def _refresh_trade_ledger_sources(
+    broker_id: Optional[str],
+    symbol: Optional[str],
+    count: int,
+) -> List[str]:
+    connected_brokers: List[str] = []
+    if broker_id:
+        status_info = broker_manager.get_broker_status(broker_id)
+        if status_info["exists"] and status_info["connected"]:
+            connected_brokers.append(broker_id)
+            await broker_manager.get_positions(broker_id)
+            await broker_manager.get_orders(broker_id, count=count, symbol=symbol)
+            try:
+                await broker_manager.get_trade_history(broker_id, count=count, symbol=symbol)
+            except Exception:
+                pass
+        return connected_brokers
+
+    for broker_info in broker_manager.list_brokers():
+        if not broker_info["connected"]:
+            continue
+        current_broker_id = broker_info["id"]
+        connected_brokers.append(current_broker_id)
+        await broker_manager.get_positions(current_broker_id)
+        await broker_manager.get_orders(current_broker_id, count=count, symbol=symbol)
+        try:
+            await broker_manager.get_trade_history(current_broker_id, count=count, symbol=symbol)
+        except Exception:
+            pass
+    return connected_brokers
+
+
+def _ledger_summary(entries: List[dict], connected_brokers: List[str]) -> dict:
+    open_entries = [entry for entry in entries if entry["status"] in {"open", "pending", "partially_filled"}]
+    total_unrealized = sum(float(entry.get("unrealized_pnl") or 0.0) for entry in open_entries)
+    total_realized = sum(float(entry.get("realized_pnl") or 0.0) for entry in entries)
+    return {
+        "total_entries": len(entries),
+        "open_entries": len(open_entries),
+        "realized_pnl": round(total_realized, 2),
+        "unrealized_pnl": round(total_unrealized, 2),
+        "connected_brokers": connected_brokers,
     }
 
 
@@ -221,6 +276,25 @@ async def place_order(order: OrderRequest) -> dict:
             take_profit_2=order.take_profit_2,
             take_profit_3=order.take_profit_3,
         )
+        if order.signal_id:
+            repo.upsert_trade_ledger_entry({
+                "broker_id": order.broker_id,
+                "source_type": "trade" if str(broker_order.order_id).startswith("trade:") else "order",
+                "source_id": str(broker_order.order_id).split("trade:", 1)[1] if str(broker_order.order_id).startswith("trade:") else broker_order.order_id,
+                "signal_id": order.signal_id,
+                "symbol": broker_order.symbol,
+                "side": broker_order.side.value,
+                "status": broker_order.status.value,
+                "quantity": broker_order.quantity,
+                "remaining_quantity": max(broker_order.quantity - broker_order.filled_quantity, 0.0),
+                "entry_price": broker_order.avg_fill_price or broker_order.price,
+                "current_price": broker_order.avg_fill_price or broker_order.price,
+                "stop_loss": broker_order.stop_loss,
+                "take_profit_1": broker_order.take_profit_1,
+                "take_profit_2": broker_order.take_profit_2,
+                "take_profit_3": broker_order.take_profit_3,
+                "metadata": {"event": "signal_linked_order", "order_id": broker_order.order_id},
+            })
     except BrokerOperationError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
@@ -428,6 +502,42 @@ async def close_position(
         raise HTTPException(status_code=400, detail=detail)
 
 
+@router.put("/trade/{broker_id}/{trade_id}")
+async def modify_trade_endpoint(
+    broker_id: str,
+    trade_id: str,
+    body: ModifyTradeRequest,
+) -> dict:
+    """Modify stop loss and/or take profit on an open trade."""
+    status = broker_manager.get_broker_status(broker_id)
+    if not status["exists"]:
+        raise HTTPException(status_code=404, detail=f"Broker '{broker_id}' not found")
+    if not status["connected"]:
+        raise HTTPException(status_code=400, detail=f"Broker '{broker_id}' is not connected")
+
+    try:
+        success = await broker_manager.modify_trade(
+            broker_id=broker_id,
+            trade_id=trade_id,
+            stop_loss=body.stop_loss,
+            take_profit=body.take_profit,
+        )
+    except BrokerOperationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+    if success:
+        return {
+            "success": True,
+            "trade_id": trade_id,
+            "stop_loss": body.stop_loss,
+            "take_profit": body.take_profit,
+            "message": f"Trade {trade_id} modified",
+            "timestamp": datetime.now().isoformat(),
+        }
+    else:
+        raise HTTPException(status_code=400, detail=f"Failed to modify trade {trade_id}")
+
+
 @router.get("/trade-history")
 async def get_trade_history(
     broker_id: Optional[str] = Query(None, description="Filter by broker"),
@@ -450,3 +560,82 @@ async def get_trade_history(
                 trades.extend(history)
 
     return trades
+
+
+@router.get("/ledger")
+async def get_trade_ledger(
+    broker_id: Optional[str] = Query(None, description="Filter by broker"),
+    symbol: Optional[str] = Query(None, description="Filter by symbol"),
+    status: Optional[str] = Query(None, description="Filter by ledger status"),
+    count: int = Query(100, description="Number of entries to fetch", ge=1, le=500),
+) -> dict:
+    """Get the unified trade ledger reconciled from positions, orders, and history."""
+    connected_brokers = await _refresh_trade_ledger_sources(broker_id, symbol, count)
+
+    entries = repo.get_trade_ledger_entries(
+        broker_id=broker_id,
+        symbol=symbol,
+        status=status,
+        limit=count,
+    )
+
+    return {
+        "entries": entries,
+        "summary": _ledger_summary(entries, connected_brokers),
+    }
+
+
+@router.get("/ledger/export")
+async def export_trade_ledger_csv(
+    broker_id: Optional[str] = Query(None, description="Filter by broker"),
+    symbol: Optional[str] = Query(None, description="Filter by symbol"),
+    status: Optional[str] = Query(None, description="Filter by ledger status"),
+    count: int = Query(500, description="Number of entries to export", ge=1, le=2000),
+) -> StreamingResponse:
+    """Export the unified trade ledger as CSV."""
+    await _refresh_trade_ledger_sources(broker_id, symbol, min(count, 500))
+    entries = repo.get_trade_ledger_entries(
+        broker_id=broker_id,
+        symbol=symbol,
+        status=status,
+        limit=count,
+    )
+    output = io.StringIO()
+    fieldnames = [
+        "ledger_id",
+        "broker_id",
+        "source_type",
+        "source_id",
+        "signal_id",
+        "symbol",
+        "side",
+        "status",
+        "outcome",
+        "quantity",
+        "remaining_quantity",
+        "entry_price",
+        "current_price",
+        "exit_price",
+        "stop_loss",
+        "take_profit_1",
+        "take_profit_2",
+        "take_profit_3",
+        "realized_pnl",
+        "unrealized_pnl",
+        "r_multiple",
+        "mfe",
+        "mae",
+        "opened_at",
+        "closed_at",
+        "updated_at",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for entry in entries:
+        writer.writerow({key: entry.get(key) for key in fieldnames})
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=live_trade_ledger.csv"},
+    )

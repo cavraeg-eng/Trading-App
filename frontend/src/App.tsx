@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, lazy, Suspense, useTransition } from 'react'
-import { BookText, Bot, LayoutDashboard, LineChart, Play, Settings, ScanLine, Users } from 'lucide-react'
+import { BookText, Bot, LayoutDashboard, LineChart, Play, Settings, ScanLine, Users, WalletCards } from 'lucide-react'
 import { api, type BackendStatus } from './lib/api'
 import { MAJOR_PAIRS, DEFAULT_PAIR, getPairBySymbol } from './config/forexPairs'
 import type { ForexPair } from './types'
@@ -15,8 +15,9 @@ const Scanner = lazy(() => import('./pages/Scanner'))
 const Social = lazy(() => import('./pages/Social'))
 const Automation = lazy(() => import('./pages/Automation'))
 const CopyJournal = lazy(() => import('./pages/CopyJournal'))
+const LiveTradeJournal = lazy(() => import('./pages/LiveTradeJournal'))
 
-type Tab = 'dashboard' | 'scanner' | 'backtest' | 'live' | 'automation' | 'journal' | 'social' | 'settings'
+type Tab = 'dashboard' | 'scanner' | 'backtest' | 'live' | 'automation' | 'live-journal' | 'journal' | 'social' | 'settings'
 
 const RECENT_PAIRS_KEY = 'tradingApp_recentPairs'
 const DEFAULT_PAIR_KEY = 'tradingApp_defaultPair'
@@ -172,7 +173,7 @@ function App() {
       }
     }
     check()
-    const id = setInterval(check, 5000)
+    const id = setInterval(check, 15000)
     return () => {
       cancelled = true
       clearInterval(id)
@@ -245,6 +246,7 @@ function App() {
     { id: 'backtest' as Tab, label: 'Backtest', icon: LineChart },
     { id: 'live' as Tab, label: 'Live Trading', icon: Play },
     { id: 'automation' as Tab, label: 'Automation', icon: Bot },
+    { id: 'live-journal' as Tab, label: 'Live Journal', icon: WalletCards },
     { id: 'journal' as Tab, label: 'Copy Journal', icon: BookText },
     { id: 'social' as Tab, label: 'Social', icon: Users },
     { id: 'settings' as Tab, label: 'Settings', icon: Settings },
@@ -324,6 +326,7 @@ function App() {
           <Scanner
             onPairChange={handlePairChange}
             onOpenDashboard={() => startTransition(() => setActiveTab('dashboard'))}
+            onOpenLiveTrading={() => startTransition(() => setActiveTab('live'))}
             onOpenBacktest={() => startTransition(() => setActiveTab('backtest'))}
             onAddToWatchlist={(pair) => {
               setActivePairs((prev) => {
@@ -345,7 +348,6 @@ function App() {
         )}
         {activeTab === 'live' && (
           <LiveTrading
-            key={`live-${backendStatus?.broker?.id ?? 'none'}-${backendStatus?.broker?.connected ? 'connected' : 'disconnected'}`}
             selectedPair={selectedPair}
             onPairChange={handlePairChange}
             activePairs={activePairs}
@@ -354,6 +356,7 @@ function App() {
           />
         )}
         {activeTab === 'automation' && <Automation />}
+        {activeTab === 'live-journal' && <LiveTradeJournal />}
         {activeTab === 'journal' && <CopyJournal />}
         {activeTab === 'social' && <Social />}
         {activeTab === 'settings' && (

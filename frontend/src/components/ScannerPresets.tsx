@@ -2,7 +2,14 @@ import {
   Activity,
   BarChart3,
   Bookmark,
+  Bot,
+  CheckCircle2,
+  Clock3,
+  Layers3,
   RefreshCw,
+  ShieldCheck,
+  Sparkles,
+  Target,
   Trash2,
   TrendingUp,
   Zap,
@@ -14,6 +21,7 @@ interface ScannerPresetsProps {
   savedScanners: SavedScanner[]
   loading: boolean
   loadingSaved: boolean
+  activeScannerKey?: string
   onApplyPreset: (preset: ScannerPreset) => void
   onApplySaved: (scanner: SavedScanner) => void
   onDeleteSaved: (scannerId: number) => void
@@ -25,6 +33,10 @@ const iconMap: Record<string, React.ElementType> = {
   activity: Activity,
   'bar-chart': BarChart3,
   'refresh-cw': RefreshCw,
+  bot: Bot,
+  target: Target,
+  shield: ShieldCheck,
+  sparkles: Sparkles,
 }
 
 function MetaPill({ label }: { label: string }) {
@@ -35,57 +47,174 @@ function MetaPill({ label }: { label: string }) {
   )
 }
 
+function rulesCount(scanner: Pick<ScannerPreset, 'conditions' | 'groups'>) {
+  return scanner.groups?.length
+    ? scanner.groups.reduce((total, group) => total + group.conditions.length, 0)
+    : scanner.conditions.length
+}
+
+function savedRulesCount(scanner: SavedScanner) {
+  return scanner.config.groups?.length
+    ? scanner.config.groups.reduce((total, group) => total + group.conditions.length, 0)
+    : scanner.config.conditions?.length || 0
+}
+
+function accentClasses(accent?: string) {
+  const styles: Record<string, { icon: string; line: string; glow: string }> = {
+    emerald: {
+      icon: 'bg-emerald-400/10 text-emerald-300 ring-emerald-400/20',
+      line: 'from-emerald-400 via-teal-300 to-cyan-300',
+      glow: 'shadow-[0_0_35px_rgba(16,185,129,0.12)]',
+    },
+    amber: {
+      icon: 'bg-amber-400/10 text-amber-300 ring-amber-400/20',
+      line: 'from-amber-300 via-orange-300 to-red-300',
+      glow: 'shadow-[0_0_35px_rgba(245,158,11,0.12)]',
+    },
+    sky: {
+      icon: 'bg-sky-400/10 text-sky-300 ring-sky-400/20',
+      line: 'from-sky-300 via-blue-300 to-indigo-300',
+      glow: 'shadow-[0_0_35px_rgba(56,189,248,0.12)]',
+    },
+    violet: {
+      icon: 'bg-violet-400/10 text-violet-300 ring-violet-400/20',
+      line: 'from-violet-300 via-fuchsia-300 to-pink-300',
+      glow: 'shadow-[0_0_35px_rgba(167,139,250,0.12)]',
+    },
+    rose: {
+      icon: 'bg-rose-400/10 text-rose-300 ring-rose-400/20',
+      line: 'from-rose-300 via-red-300 to-orange-300',
+      glow: 'shadow-[0_0_35px_rgba(251,113,133,0.12)]',
+    },
+  }
+  return styles[accent || ''] || styles.sky
+}
+
 export default function ScannerPresets({
   presets,
   savedScanners,
   loading,
   loadingSaved,
+  activeScannerKey,
   onApplyPreset,
   onApplySaved,
   onDeleteSaved,
 }: ScannerPresetsProps) {
   return (
-    <div className="space-y-6">
-      {/* Presets section */}
+    <div className="space-y-5">
       {presets.length > 0 || loading ? (
         <section>
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-trading-accent">
+                <Bot size={14} />
+                Scanner bot library
+              </div>
+              <h3 className="mt-1 text-lg font-bold text-trading-text">Choose the market scanner you want to run</h3>
+              <p className="mt-1 max-w-2xl text-xs text-trading-muted">
+                Each bot loads a different rule stack, timeframe, and trading style so you can switch workflows without rebuilding conditions.
+              </p>
+            </div>
+            <div className="flex gap-2 text-[11px] text-trading-muted">
+              <span className="rounded-full border border-trading-border bg-trading-bg px-2.5 py-1">{presets.length} built-in bots</span>
+              <span className="rounded-full border border-trading-border bg-trading-bg px-2.5 py-1">{savedScanners.length} saved</span>
+            </div>
+          </div>
           {loading ? (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {[...Array(4)].map((_, index) => (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {[...Array(6)].map((_, index) => (
                 <div
                   key={index}
-                  className="animate-pulse rounded-lg border border-trading-border bg-trading-card p-3"
+                  className="animate-pulse rounded-xl border border-trading-border bg-trading-bg/70 p-4"
                 >
-                  <div className="mb-2 h-8 w-8 rounded-md bg-trading-border" />
-                  <div className="mb-1.5 h-4 w-2/3 rounded bg-trading-border" />
-                  <div className="mb-3 h-3 w-full rounded bg-trading-border" />
-                  <div className="h-8 rounded bg-trading-border" />
+                  <div className="mb-3 h-10 w-10 rounded-lg bg-trading-border" />
+                  <div className="mb-2 h-4 w-2/3 rounded bg-trading-border" />
+                  <div className="mb-3 h-10 rounded bg-trading-border" />
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="h-12 rounded bg-trading-border" />
+                    <div className="h-12 rounded bg-trading-border" />
+                    <div className="h-12 rounded bg-trading-border" />
+                  </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {presets.map((preset) => {
                 const Icon = iconMap[preset.icon] || Activity
+                const selected = activeScannerKey === `preset:${preset.id}`
+                const accent = accentClasses(preset.accent)
                 return (
-                  <button
+                  <div
                     key={preset.id}
-                    onClick={() => onApplyPreset(preset)}
-                    className="group rounded-lg border border-trading-border bg-trading-card p-3 text-left transition-all hover:border-trading-accent/50 hover:bg-trading-accent/5"
+                    className={`group relative overflow-hidden rounded-xl border bg-trading-bg/70 p-4 text-left transition-all hover:-translate-y-0.5 hover:border-trading-accent/50 ${
+                      selected
+                        ? `border-trading-accent/70 ring-1 ring-trading-accent/40 ${accent.glow}`
+                        : 'border-trading-border'
+                    }`}
                   >
-                    <div className="mb-2 flex items-center gap-2">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-trading-bg">
-                        <Icon size={16} className="text-trading-accent" />
+                    <div className={`absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r ${accent.line}`} />
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className={`flex h-10 w-10 items-center justify-center rounded-lg ring-1 ${accent.icon}`}>
+                          <Icon size={18} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-semibold text-trading-text">{preset.name}</h4>
+                            {selected ? <CheckCircle2 size={14} className="text-trading-accent" /> : null}
+                          </div>
+                          <p className="text-[11px] uppercase tracking-[0.18em] text-trading-muted">{preset.category || 'Strategy bot'}</p>
+                        </div>
                       </div>
-                      <h4 className="text-sm font-semibold text-trading-text">{preset.name}</h4>
+                      <span className="rounded-full border border-trading-border bg-trading-card px-2 py-0.5 text-[10px] font-medium text-trading-muted">
+                        {preset.popularity || 'Ready'}
+                      </span>
                     </div>
-                    <p className="mb-2 line-clamp-2 text-xs text-trading-muted">{preset.description}</p>
-                    <div className="flex flex-wrap gap-1">
-                      <MetaPill label={`${preset.conditions.length} rules`} />
+                    <p className="mt-3 min-h-[2.5rem] text-xs leading-5 text-trading-muted">{preset.description}</p>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      <div className="rounded-lg border border-trading-border bg-trading-card/70 p-2">
+                        <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-trading-muted">
+                          <Layers3 size={11} />
+                          Rules
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-trading-text">{rulesCount(preset)}</div>
+                      </div>
+                      <div className="rounded-lg border border-trading-border bg-trading-card/70 p-2">
+                        <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-trading-muted">
+                          <Clock3 size={11} />
+                          Cadence
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-trading-text">{preset.cadence || preset.timeframe?.toUpperCase() || '1H'}</div>
+                      </div>
+                      <div className="rounded-lg border border-trading-border bg-trading-card/70 p-2">
+                        <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-trading-muted">
+                          <ShieldCheck size={11} />
+                          Risk
+                        </div>
+                        <div className="mt-1 text-sm font-semibold capitalize text-trading-text">{preset.risk || 'medium'}</div>
+                      </div>
+                    </div>
+                    <p className="mt-3 text-[11px] text-trading-muted">
+                      <span className="font-medium text-trading-text">Best for:</span> {preset.best_for || 'General opportunity scanning'}
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      <MetaPill label={`${rulesCount(preset)} rules`} />
                       {preset.timeframe ? <MetaPill label={preset.timeframe.toUpperCase()} /> : null}
                       {preset.trade_style ? <MetaPill label={preset.trade_style} /> : null}
+                      {preset.tags?.slice(0, 2).map((tag) => <MetaPill key={tag} label={tag} />)}
                     </div>
-                  </button>
+                    <button
+                      onClick={() => onApplyPreset(preset)}
+                      className={`mt-4 w-full rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
+                        selected
+                          ? 'bg-trading-accent text-white'
+                          : 'bg-trading-card text-trading-text hover:bg-trading-accent hover:text-white'
+                      }`}
+                    >
+                      {selected ? 'Selected scanner' : 'Use this scanner'}
+                    </button>
+                  </div>
                 )
               })}
             </div>
@@ -93,38 +222,46 @@ export default function ScannerPresets({
         </section>
       ) : null}
 
-      {/* Saved scanners section */}
       {savedScanners.length > 0 || loadingSaved ? (
         <section>
+          <div className="mb-3 flex items-center gap-2">
+            <Bookmark size={14} className="text-trading-accent" />
+            <h3 className="text-sm font-semibold text-trading-text">Your saved scanners</h3>
+          </div>
           {loadingSaved ? (
             <div className="rounded-lg border border-trading-border bg-trading-card p-3 text-sm text-trading-muted">
               Loading saved scanners...
             </div>
           ) : savedScanners.length === 0 ? null : (
-            <div className="divide-y divide-trading-border rounded-lg border border-trading-border bg-trading-card">
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
               {savedScanners.map((scanner) => (
                 <div
                   key={scanner.id}
-                  className="flex items-center justify-between gap-3 px-3 py-2.5"
+                  className={`flex items-center justify-between gap-3 rounded-lg border bg-trading-bg px-3 py-2.5 ${
+                    activeScannerKey === `saved:${scanner.id}` ? 'border-trading-accent/70 ring-1 ring-trading-accent/30' : 'border-trading-border'
+                  }`}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <Bookmark size={12} className="shrink-0 text-trading-accent" />
                       <span className="truncate text-sm font-medium text-trading-text">{scanner.name}</span>
-                      <MetaPill label={`${scanner.config.conditions?.length || 0} rules`} />
+                      <MetaPill label={`${savedRulesCount(scanner)} rules`} />
                       {scanner.config.timeframe ? <MetaPill label={scanner.config.timeframe.toUpperCase()} /> : null}
                     </div>
                   </div>
                   <div className="flex shrink-0 gap-1">
                     <button
                       onClick={() => onApplySaved(scanner)}
-                      className="rounded-md px-2.5 py-1 text-xs font-medium text-trading-text transition-colors hover:bg-trading-bg hover:text-trading-accent"
+                      aria-label={`Load ${scanner.name}`}
+                      className="rounded-md px-2.5 py-1 text-xs font-medium text-trading-text transition-colors hover:bg-trading-card hover:text-trading-accent"
                     >
                       Load
                     </button>
                     <button
                       onClick={() => onDeleteSaved(scanner.id)}
-                      className="rounded-md px-2 py-1 text-xs text-trading-muted transition-colors hover:bg-trading-bg hover:text-red-300"
+                      aria-label={`Delete ${scanner.name}`}
+                      title={`Delete ${scanner.name}`}
+                      className="rounded-md px-2 py-1 text-xs text-trading-muted transition-colors hover:bg-trading-card hover:text-red-300"
                     >
                       <Trash2 size={12} />
                     </button>
@@ -136,7 +273,6 @@ export default function ScannerPresets({
         </section>
       ) : null}
 
-      {/* Empty state when both are empty */}
       {!loading && !loadingSaved && presets.length === 0 && savedScanners.length === 0 ? (
         <div className="rounded-lg border border-dashed border-trading-border bg-trading-card px-4 py-6 text-center text-sm text-trading-muted">
           No presets or saved scanners available.

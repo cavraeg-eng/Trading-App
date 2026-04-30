@@ -127,6 +127,7 @@ class OrderRequest(BaseModel):
     take_profit_1: Optional[float] = None
     take_profit_2: Optional[float] = None
     take_profit_3: Optional[float] = None
+    signal_id: Optional[str] = None
 
 
 class LeaderboardEntry(BaseModel):

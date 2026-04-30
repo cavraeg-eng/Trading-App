@@ -1,12 +1,3 @@
-export interface PriceData {
-  time: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
-
 export interface Position {
   id: string;
   symbol: string;
@@ -130,6 +121,12 @@ export interface ScannerPreset {
   timeframe?: ScannerTimeframe;
   recommended_pairs?: string[];
   tags?: string[];
+  category?: string;
+  best_for?: string;
+  cadence?: string;
+  risk?: 'low' | 'medium' | 'high';
+  popularity?: string;
+  accent?: string;
 }
 
 export interface ScannerIndicatorDefinition {
@@ -497,6 +494,8 @@ export interface CopyTradeStats {
   max_loss_streak: number;
   avg_hold_seconds: number;
   avg_r_multiple: number | null;
+  avg_mfe?: number | null;
+  avg_mae?: number | null;
   partial_exit_trades: number;
   symbol_breakdown: Array<{
     symbol: string;
@@ -513,6 +512,8 @@ export interface CopyTradeStats {
     closed_at?: number | null;
     holding_seconds?: number | null;
     r_multiple?: number | null;
+    mfe?: number | null;
+    mae?: number | null;
   }>;
   equity_curve: Array<{
     copy_trade_id: string;
@@ -564,6 +565,29 @@ export interface AlignmentData {
   total: number;
   timeframes: AlignmentTimeframe[];
   timestamp: string;
+}
+
+// Active position overlay for TradingChart MT5-style display
+export interface ActivePositionOverlay {
+  entryPrice: number;
+  currentPrice: number;
+  side: 'long' | 'short';
+  unrealizedPnl: number;
+  quantity: number;
+  positionId?: string;
+  stopLoss?: number;
+  takeProfit1?: number;
+  takeProfit2?: number;
+  takeProfit3?: number;
+}
+
+// Ghost overlay for closed trade history visualization
+export interface GhostTradeOverlay {
+  entryPrice: number;
+  exitPrice: number;
+  side: 'buy' | 'sell';
+  realizedPnl: number;
+  symbol: string;
 }
 
 // Signal backtest result from POST /api/backtest/signal

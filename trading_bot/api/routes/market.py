@@ -349,8 +349,6 @@ def _quality_penalty(quality_flags: List[str], timeframe: str, trade_style: str)
     penalty = 0
     if any(flag.startswith("stale_data") for flag in quality_flags):
         penalty += 24 if trade_style == "scalp" and timeframe in ("1m", "5m") else 12
-    if "synthetic_spot" in quality_flags:
-        penalty += 8 if trade_style == "scalp" else 4
     if "fallback_source" in quality_flags:
         penalty += 6
     if any(flag.startswith("price_jump") for flag in quality_flags):
@@ -375,9 +373,6 @@ def _should_force_hold_for_quality(
         return True
 
     if symbol.endswith("/USD") and symbol not in SPOT_PRICE_SYMBOLS and any(flag.startswith("stale_data") for flag in quality_flags):
-        return True
-
-    if symbol in SPOT_PRICE_SYMBOLS and "synthetic_spot" in quality_flags:
         return True
 
     return False

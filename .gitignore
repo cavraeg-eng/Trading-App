@@ -1,11 +1,34 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+.envrc
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.csr
+id_rsa*
+id_dsa*
+secrets.*
+.secrets/
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+coverage.xml
+htmlcov/
 build/
-develop-eggs/
 dist/
 downloads/
 eggs/
@@ -21,95 +44,80 @@ wheels/
 *.egg
 
 # Virtual environments
+.venv/
 venv/
 env/
 ENV/
-.venv/
 
-# Environment variables
-.env
-.env.local
-.env.*.local
+# Node / frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# IDE
+# Data, databases, and logs
+data/
+trading_bot/data/
+logs/
+*.log
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.csv
+*.tsv
+
+# Models and checkpoints
+models/
+trading_bot/models/
+checkpoints/
+*.pkl
+*.pickle
+*.pt
+*.pth
+*.onnx
+
+# Local agent/tooling state
+.agents/
+.playwright-cli/
+.qoder/
+.verdent/
+.tmp*/
+tmp/
+temp/
+*.tmp
+*.temp
+.cache/
+
+# Local screenshots and personal documents
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
+/*.gif
+/*.pages
+
+# IDE and OS files
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 .DS_Store
-
-# Data and logs
-data/
-logs/
-*.db
-*.sqlite
-*.sqlite3
-
-# Models and checkpoints
-models/
-checkpoints/
-*.pkl
-*.pt
-*.pth
-
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
-
-# Testing
-.coverage
-htmlcov/
-.pytest_cache/
-.tox/
-
-# Documentation
-docs/_build/
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-
-# Streamlit
-.streamlit/
-
-# VectorBT cache
-.vectorbt/
-
-# Auto-generated entries
-# Dependencies
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Build outputs
-dist/
-build/
-*.log
-
-# Environment files
-.env
-.env.*
-!.env.example
-
-# IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS files
-.DS_Store
 Thumbs.db
 
-# Temporary files
-*.tmp
-*.temp
-.cache/
+# Jupyter and docs
+.ipynb_checkpoints/
+*.ipynb
+docs/_build/
 
-# Sensitive files (auto-detected)
-.env
-.env.example
+# App/tool caches
+.streamlit/
+.vectorbt/
 

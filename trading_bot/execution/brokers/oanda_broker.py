@@ -1,8 +1,9 @@
 """OANDA REST API v20 broker implementation."""
 
 import asyncio
+import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -19,6 +20,8 @@ from trading_bot.execution.broker_base import (
 from trading_bot.execution.broker_manager import BrokerOperationError
 
 logger = get_logger(__name__)
+
+_MISS = object()  # cache miss sentinel
 
 
 class OANDABroker(BaseBroker):
@@ -38,6 +41,76 @@ class OANDABroker(BaseBroker):
         self._base_url: str = "https://api-fxpractice.oanda.com/v3"
         self._environment: str = "practice"
         self._timeout = httpx.Timeout(connect=10.0, read=25.0, write=25.0, pool=10.0)
+
+        # Simple TTL cache: {key: (timestamp, data)}
+        self._cache: Dict[str, Tuple[float, Any]] = {}
+        self._cache_ttl: float = 10.0
+        self._cache_stale_ttl: float = 45.0
+        self._cache_lock = asyncio.Lock()
+        self._cache_refreshing: set = set()  # keys currently being refreshed
+
+    def _cache_get(self, key: str) -> Any:
+        """Return cached value if still fresh, else None sentinel."""
+        entry = self._cache.get(key)
+        if entry and (time.monotonic() - entry[0]) < self._cache_ttl:
+            return entry[1]
+        return _MISS
+
+    def _cache_get_stale(self, key: str) -> Any:
+        """Return cached value even if stale (within stale_ttl), else _MISS."""
+        entry = self._cache.get(key)
+        if entry and (time.monotonic() - entry[0]) < self._cache_stale_ttl:
+            return entry[1]
+        return _MISS
+
+    def _cache_set(self, key: str, value: Any) -> None:
+        self._cache[key] = (time.monotonic(), value)
+
+    def _cache_invalidate(self, *keys: str) -> None:
+        """Remove specific keys, or all if no keys given."""
+        if keys:
+            for k in keys:
+                self._cache.pop(k, None)
+        else:
+            self._cache.clear()
+
+    def _to_float(self, value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
+
+    def _extract_price(self, payload: Dict[str, Any], *keys: str) -> Optional[float]:
+        for key in keys:
+            value = payload.get(key)
+            if isinstance(value, dict):
+                parsed = self._to_float(value.get("price"))
+            else:
+                parsed = self._to_float(value)
+            if parsed is not None:
+                return parsed
+        return None
+
+    def _extract_trade_stop_loss(self, trade: Dict[str, Any]) -> Optional[float]:
+        return self._extract_price(
+            trade,
+            "stopLossOrder",
+            "stopLossOnFill",
+            "stopLoss",
+            "stop_loss",
+        )
+
+    def _extract_trade_take_profit(self, trade: Dict[str, Any]) -> Optional[float]:
+        return self._extract_price(
+            trade,
+            "takeProfitOrder",
+            "takeProfitOnFill",
+            "takeProfit",
+            "take_profit",
+        )
 
     async def connect(self, credentials: Dict[str, str]) -> bool:
         """Connect to OANDA with API credentials.
@@ -84,6 +157,7 @@ class OANDABroker(BaseBroker):
             response.raise_for_status()
 
             self.connected = True
+            self._cache_invalidate()
             logger.info(f"Connected to OANDA ({environment})")
             return True
 
@@ -103,6 +177,7 @@ class OANDABroker(BaseBroker):
                 await self._client.aclose()
                 self._client = None
             self.connected = False
+            self._cache_invalidate()
             logger.info("Disconnected from OANDA")
             return True
         except Exception as e:
@@ -197,6 +272,8 @@ class OANDABroker(BaseBroker):
                 quantity=normalized_quantity,
             )
 
+            # Invalidate caches after order placement
+            self._cache_invalidate()
             return order
 
         except httpx.TimeoutException as e:
@@ -254,6 +331,7 @@ class OANDABroker(BaseBroker):
             )
             response.raise_for_status()
             logger.info(f"Order {order_id} cancelled on OANDA")
+            self._cache_invalidate()
             return True
         except httpx.HTTPError as e:
             logger.error(f"Failed to cancel order {order_id} on OANDA: {e}")
@@ -268,6 +346,32 @@ class OANDABroker(BaseBroker):
         Returns:
             List of BrokerPosition objects
         """
+        cached = self._cache_get('positions')
+        if cached is not _MISS:
+            return cached
+
+        # Return stale data immediately if available, refresh in background
+        stale = self._cache_get_stale('positions')
+        if stale is not _MISS and 'positions' not in self._cache_refreshing:
+            self._cache_refreshing.add('positions')
+            asyncio.get_event_loop().create_task(self._refresh_positions())
+            return stale
+
+        if not self.connected or not self._client:
+            raise RuntimeError("Not connected to OANDA")
+
+        return await self._fetch_positions_from_oanda()
+
+    async def _refresh_positions(self):
+        """Background refresh of positions cache."""
+        try:
+            await self._fetch_positions_from_oanda()
+        except Exception as e:
+            logger.warning(f"Background position refresh failed: {e}")
+        finally:
+            self._cache_refreshing.discard('positions')
+
+    async def _fetch_positions_from_oanda(self) -> List[BrokerPosition]:
         if not self.connected or not self._client:
             raise RuntimeError("Not connected to OANDA")
 
@@ -314,13 +418,14 @@ class OANDABroker(BaseBroker):
                     continue
 
                 instrument = instrument_raw.replace("_", "/")
-                cur_price = current_prices.get(instrument_raw, 0.0)
+                entry_price = float(trade.get("price", 0) or 0)
+                cur_price = current_prices.get(instrument_raw, entry_price)
                 positions.append(
                     BrokerPosition(
                         symbol=instrument,
                         side="long" if current_units > 0 else "short",
                         quantity=abs(current_units),
-                        entry_price=float(trade.get("price", 0) or 0),
+                        entry_price=entry_price,
                         current_price=cur_price,
                         unrealized_pnl=float(trade.get("unrealizedPL", 0) or 0),
                         broker_id=self.broker_id,
@@ -329,6 +434,7 @@ class OANDABroker(BaseBroker):
                     )
                 )
 
+            self._cache_set('positions', positions)
             return positions
 
         except httpx.HTTPError as e:
@@ -344,6 +450,17 @@ class OANDABroker(BaseBroker):
         Returns:
             BrokerBalance object
         """
+        cached = self._cache_get('balance')
+        if cached is not _MISS:
+            return cached
+
+        # Return stale data immediately if available
+        stale = self._cache_get_stale('balance')
+        if stale is not _MISS and 'balance' not in self._cache_refreshing:
+            self._cache_refreshing.add('balance')
+            asyncio.get_event_loop().create_task(self._refresh_balance())
+            return stale
+
         if not self.connected or not self._client:
             raise RuntimeError("Not connected to OANDA")
 
@@ -356,12 +473,14 @@ class OANDABroker(BaseBroker):
 
             account = data.get("account", {})
 
-            return BrokerBalance(
+            result = BrokerBalance(
                 total_equity=float(account.get("balance", 0)),
                 available_margin=float(account.get("marginAvailable", 0)),
                 used_margin=float(account.get("marginUsed", 0)),
                 currency=account.get("currency", "USD"),
             )
+            self._cache_set('balance', result)
+            return result
 
         except httpx.HTTPError as e:
             logger.error(f"Failed to fetch balance from OANDA: {e}")
@@ -369,6 +488,28 @@ class OANDABroker(BaseBroker):
         except Exception as e:
             logger.error(f"Failed to fetch balance from OANDA: {e}")
             return BrokerBalance(total_equity=0, available_margin=0, used_margin=0)
+
+    async def _refresh_balance(self):
+        """Background refresh of balance cache."""
+        try:
+            if not self.connected or not self._client:
+                return
+            response = await self._client.get(
+                f"{self._base_url}/accounts/{self._account_id}/summary"
+            )
+            response.raise_for_status()
+            account = response.json().get("account", {})
+            result = BrokerBalance(
+                total_equity=float(account.get("balance", 0)),
+                available_margin=float(account.get("marginAvailable", 0)),
+                used_margin=float(account.get("marginUsed", 0)),
+                currency=account.get("currency", "USD"),
+            )
+            self._cache_set('balance', result)
+        except Exception as e:
+            logger.warning(f"Background balance refresh failed: {e}")
+        finally:
+            self._cache_refreshing.discard('balance')
 
     def _map_order_type(self, oanda_type: str) -> OrderType:
         normalized = oanda_type.upper()
@@ -386,6 +527,12 @@ class OANDABroker(BaseBroker):
         except ValueError:
             return datetime.utcnow()
 
+    def _order_sort_timestamp(self, order: BrokerOrder) -> float:
+        try:
+            return order.updated_at.timestamp()
+        except Exception:
+            return 0.0
+
     async def get_orders(
         self,
         count: int = 50,
@@ -393,6 +540,11 @@ class OANDABroker(BaseBroker):
         status: Optional[str] = None,
     ) -> List[BrokerOrder]:
         """Get recent orders from OANDA."""
+        cache_key = f'orders:{count}:{symbol}:{status}'
+        cached = self._cache_get(cache_key)
+        if cached is not _MISS:
+            return cached
+
         if not self.connected or not self._client:
             raise RuntimeError("Not connected to OANDA")
 
@@ -458,6 +610,8 @@ class OANDABroker(BaseBroker):
                         status=self._map_order_status(raw_status),
                         filled_quantity=filled_quantity,
                         avg_fill_price=price if raw_status == "FILLED" and price is not None else 0.0,
+                        stop_loss=self._extract_price(order, "stopLossOnFill", "stopLossOrder", "stopLoss"),
+                        take_profit_1=self._extract_price(order, "takeProfitOnFill", "takeProfitOrder", "takeProfit"),
                         created_at=self._parse_timestamp(order.get("createTime")),
                         updated_at=self._parse_timestamp(updated_at),
                         broker_id=self.broker_id,
@@ -465,7 +619,59 @@ class OANDABroker(BaseBroker):
                     )
                 )
 
-            return orders[:count]
+            trade_response = await self._client.get(
+                f"{self._base_url}/accounts/{self._account_id}/openTrades",
+            )
+            trade_response.raise_for_status()
+            for trade in trade_response.json().get("trades", []):
+                trade_symbol = trade.get("instrument", "").replace("_", "/")
+                if symbol and trade_symbol != symbol:
+                    continue
+                stop_loss = self._extract_trade_stop_loss(trade)
+                take_profit = self._extract_trade_take_profit(trade)
+                if stop_loss is None and take_profit is None:
+                    continue
+                trade_units = float(trade.get("currentUnits", trade.get("initialUnits", 0)) or 0)
+                if trade_units == 0:
+                    continue
+                entry_price = float(trade.get("price", 0) or 0)
+                trade_id = str(trade.get("id", "") or "")
+                take_profit_order = trade.get("takeProfitOrder")
+                updated_at = (
+                    take_profit_order.get("createTime")
+                    if isinstance(take_profit_order, dict)
+                    else trade.get("openTime")
+                )
+                orders.append(
+                    BrokerOrder(
+                        order_id=f"trade:{trade_id}" if trade_id else f"trade:{trade_symbol}",
+                        symbol=trade_symbol,
+                        side=OrderSide.BUY if trade_units > 0 else OrderSide.SELL,
+                        order_type=OrderType.MARKET,
+                        quantity=abs(trade_units),
+                        price=entry_price,
+                        status=OrderStatus.OPEN,
+                        filled_quantity=abs(trade_units),
+                        avg_fill_price=entry_price,
+                        stop_loss=stop_loss,
+                        take_profit_1=take_profit,
+                        broker_id=self.broker_id,
+                        created_at=self._parse_timestamp(trade.get("openTime")),
+                        updated_at=self._parse_timestamp(updated_at),
+                        metadata={"trade": trade},
+                    )
+                )
+
+            result = sorted(
+                orders,
+                key=lambda order: (
+                    order.status == OrderStatus.OPEN,
+                    self._order_sort_timestamp(order),
+                ),
+                reverse=True,
+            )[:count]
+            self._cache_set(cache_key, result)
+            return result
         except Exception as e:
             logger.error(f"Failed to fetch orders from OANDA: {e}")
             return []
@@ -499,6 +705,8 @@ class OANDABroker(BaseBroker):
                 quantity=abs(float(order.get("units", 0))),
                 price=float(order.get("price", 0)) if order.get("price") else None,
                 status=self._map_order_status(order.get("state", "PENDING")),
+                stop_loss=self._extract_price(order, "stopLossOnFill", "stopLossOrder", "stopLoss"),
+                take_profit_1=self._extract_price(order, "takeProfitOnFill", "takeProfitOrder", "takeProfit"),
                 broker_id=self.broker_id,
                 metadata=order,
             )
@@ -521,6 +729,7 @@ class OANDABroker(BaseBroker):
         """
         status_map = {
             "PENDING": OrderStatus.PENDING,
+            "OPEN": OrderStatus.OPEN,
             "FILLED": OrderStatus.FILLED,
             "CANCELLED": OrderStatus.CANCELLED,
             "CANCELLED_BY_CLIENT": OrderStatus.CANCELLED,
@@ -553,6 +762,7 @@ class OANDABroker(BaseBroker):
                 )
                 response.raise_for_status()
                 logger.info("Trade closed on OANDA", symbol=symbol, position_id=position_id)
+                self._cache_invalidate()  # Invalidate after close-by-ID
                 return True
 
             oanda_symbol = symbol.replace("/", "_")
@@ -576,6 +786,7 @@ class OANDABroker(BaseBroker):
             )
             response.raise_for_status()
             logger.info(f"Position closed on OANDA", symbol=symbol)
+            self._cache_invalidate()  # Invalidate after close
             return True
         except httpx.HTTPError as e:
             logger.error(f"Failed to close position on OANDA: {e}")
@@ -583,6 +794,83 @@ class OANDABroker(BaseBroker):
         except Exception as e:
             logger.error(f"Failed to close position on OANDA: {e}")
             return False
+
+    async def modify_trade(
+        self,
+        trade_id: str,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+    ) -> bool:
+        """Modify stop loss and/or take profit on an open OANDA trade.
+
+        Uses OANDA v20 PUT /accounts/{id}/trades/{tradeId}/orders endpoint.
+
+        Args:
+            trade_id: OANDA trade ID
+            stop_loss: New stop loss price (None to leave unchanged, 0 to remove)
+            take_profit: New take profit price (None to leave unchanged, 0 to remove)
+
+        Returns:
+            True if modification was successful
+        """
+        if not self.connected or not self._client:
+            raise RuntimeError("Not connected to OANDA")
+
+        try:
+            body: Dict[str, Any] = {}
+
+            if stop_loss is not None:
+                if stop_loss > 0:
+                    body["stopLoss"] = {"price": str(stop_loss)}
+                else:
+                    # Setting to 0 means remove SL
+                    body["stopLoss"] = None
+
+            if take_profit is not None:
+                if take_profit > 0:
+                    body["takeProfit"] = {"price": str(take_profit)}
+                else:
+                    body["takeProfit"] = None
+
+            if not body:
+                logger.warning(f"modify_trade called with no changes for trade {trade_id}")
+                return True
+
+            response = await self._client.put(
+                f"{self._base_url}/accounts/{self._account_id}/trades/{trade_id}/orders",
+                json=body,
+            )
+            response.raise_for_status()
+            logger.info(
+                "Trade modified on OANDA",
+                trade_id=trade_id,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+            )
+            self._cache_invalidate()
+            return True
+        except httpx.HTTPStatusError as e:
+            detail = e.response.text[:500] if e.response is not None else str(e)
+            logger.error(f"Failed to modify trade {trade_id} on OANDA: {detail}")
+            raise BrokerOperationError(
+                detail=f"OANDA rejected trade modification for {trade_id}: {detail}",
+                category="rejected",
+                status_code=e.response.status_code if e.response is not None else 502,
+            )
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to modify trade {trade_id} on OANDA: {e}")
+            raise BrokerOperationError(
+                detail=f"OANDA HTTP error modifying trade {trade_id}: {e}",
+                category="http_error",
+                status_code=502,
+            )
+        except Exception as e:
+            logger.error(f"Failed to modify trade {trade_id} on OANDA: {e}")
+            raise BrokerOperationError(
+                detail=f"Unexpected error modifying trade {trade_id}: {e}",
+                category="unexpected_error",
+                status_code=502,
+            )
 
     async def get_trade_history(
         self,
@@ -598,6 +886,11 @@ class OANDABroker(BaseBroker):
         Returns:
             List of trade dictionaries
         """
+        cache_key = f'history:{count}:{symbol}'
+        cached = self._cache_get(cache_key)
+        if cached is not _MISS:
+            return cached
+
         if not self.connected or not self._client:
             raise RuntimeError("Not connected to OANDA")
 
@@ -627,6 +920,7 @@ class OANDABroker(BaseBroker):
                     "closed_at": t.get("closeTime", ""),
                     "state": t.get("state", "CLOSED"),
                 })
+            self._cache_set(cache_key, trades)
             return trades
 
         except Exception as e:

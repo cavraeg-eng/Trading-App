@@ -79,6 +79,61 @@ def init_db(path: Path) -> None:
         "CREATE INDEX IF NOT EXISTS idx_copy_trades_closed_at "
         "ON copy_trades(closed_at DESC)"
     )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS trade_ledger_entries (
+            ledger_id        TEXT PRIMARY KEY,
+            broker_id        TEXT NOT NULL,
+            source_type      TEXT NOT NULL,
+            source_id        TEXT NOT NULL,
+            signal_id        TEXT,
+            symbol           TEXT NOT NULL,
+            side             TEXT NOT NULL,
+            status           TEXT NOT NULL,
+            quantity         REAL NOT NULL DEFAULT 0.0,
+            remaining_quantity REAL,
+            entry_price      REAL,
+            current_price    REAL,
+            exit_price       REAL,
+            stop_loss        REAL,
+            take_profit_1    REAL,
+            take_profit_2    REAL,
+            take_profit_3    REAL,
+            unrealized_pnl   REAL NOT NULL DEFAULT 0.0,
+            realized_pnl     REAL NOT NULL DEFAULT 0.0,
+            max_favorable_price REAL,
+            max_adverse_price REAL,
+            mfe              REAL,
+            mae              REAL,
+            r_multiple       REAL,
+            outcome          TEXT,
+            opened_at        TEXT,
+            closed_at        TEXT,
+            updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+            metadata_json    TEXT,
+            UNIQUE (broker_id, source_type, source_id)
+        )"""
+    )
+    ledger_cols = [row[1] for row in conn.execute("PRAGMA table_info(trade_ledger_entries)").fetchall()]
+    ledger_migrations = {
+        "signal_id": "ALTER TABLE trade_ledger_entries ADD COLUMN signal_id TEXT",
+        "max_favorable_price": "ALTER TABLE trade_ledger_entries ADD COLUMN max_favorable_price REAL",
+        "max_adverse_price": "ALTER TABLE trade_ledger_entries ADD COLUMN max_adverse_price REAL",
+        "mfe": "ALTER TABLE trade_ledger_entries ADD COLUMN mfe REAL",
+        "mae": "ALTER TABLE trade_ledger_entries ADD COLUMN mae REAL",
+        "r_multiple": "ALTER TABLE trade_ledger_entries ADD COLUMN r_multiple REAL",
+        "outcome": "ALTER TABLE trade_ledger_entries ADD COLUMN outcome TEXT",
+    }
+    for col, sql in ledger_migrations.items():
+        if ledger_cols and col not in ledger_cols:
+            conn.execute(sql)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_trade_ledger_broker_symbol "
+        "ON trade_ledger_entries(broker_id, symbol, updated_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_trade_ledger_status "
+        "ON trade_ledger_entries(status, updated_at DESC)"
+    )
     conn.commit()
     conn.close()
 

@@ -10,7 +10,12 @@ from typing import Dict, List, Optional, Tuple
 from fastapi import APIRouter, Query
 
 from trading_bot.api.models import SignalBreakdown, SignalDirection, SignalStatus
-from trading_bot.api.routes.market import get_shared_ohlcv, analyze_symbol, compute_ai_score, get_shared_ohlcv_with_metadata
+from trading_bot.api.routes.market import (
+    get_shared_ohlcv,
+    analyze_symbol,
+    compute_ai_score,
+    get_shared_ohlcv_with_metadata,
+)
 from trading_bot.config import get_logger
 from trading_bot.persistence import repositories as repo
 
@@ -144,6 +149,101 @@ def _signal_key(symbol: str, timeframe: str, trade_style: str) -> str:
 
 def _signal_id(symbol: str, timeframe: str, trade_style: str, created_at: float) -> str:
     return f"{symbol}|{timeframe}|{trade_style}|{int(created_at)}"
+
+
+def _signal_direction(value: object) -> str:
+    normalized = str(value or "").upper()
+    if normalized in {"BUY", "SELL"}:
+        return normalized
+    return "HOLD"
+
+
+def _is_chartable_signal(direction: object, confidence: object, status: object) -> bool:
+    if _signal_direction(direction) == "HOLD":
+        return False
+    try:
+        numeric_confidence = float(confidence)
+    except (TypeError, ValueError):
+        numeric_confidence = 0.0
+    if numeric_confidence < 50:
+        return False
+    return str(status or "").upper() != SignalStatus.EXPIRED.value
+
+
+def _preferred_chart_signal(
+    symbol: str,
+    timeframe: str,
+    trade_style: str,
+    primary: dict,
+) -> dict:
+    if _is_chartable_signal(
+        primary.get("direction"),
+        primary.get("confidence"),
+        primary.get("signal_status"),
+    ):
+        primary["display_source"] = "primary"
+        return primary
+
+    candidates = [
+        (timeframe, "swing"),
+        ("1h", "swing"),
+        ("1h", "scalp"),
+        ("15m", "swing"),
+    ]
+    seen = {(timeframe, trade_style)}
+    for candidate_timeframe, candidate_style in candidates:
+        if (candidate_timeframe, candidate_style) in seen:
+            continue
+        seen.add((candidate_timeframe, candidate_style))
+        analysis = analyze_symbol(symbol, candidate_timeframe, trade_style=candidate_style)
+        if not analysis:
+            continue
+        direction = _signal_direction({"buy": "BUY", "sell": "SELL"}.get(analysis.get("signal")))
+        confidence = int(analysis.get("confidence", 0) or 0)
+        if not _is_chartable_signal(direction, confidence, SignalStatus.VALID.value):
+            continue
+        now = time.time()
+        response = _build_response(
+            ActiveSignal(
+                symbol=symbol,
+                direction=direction,
+                confidence=confidence,
+                entry_min=analysis["entryRange"]["min"],
+                entry_max=analysis["entryRange"]["max"],
+                entry_price=analysis["currentPrice"],
+                stop_loss=analysis["stopLoss"],
+                take_profit1=analysis["takeProfit1"],
+                take_profit2=analysis["takeProfit2"],
+                take_profit3=analysis["takeProfit3"],
+                created_at=now,
+                timeframe=candidate_timeframe,
+                indicators=[
+                    {
+                        "name": ind["name"],
+                        "signal": ind["signal"],
+                        "contribution": 0.15 if ind["signal"] == "bullish" else (-0.15 if ind["signal"] == "bearish" else 0.0),
+                        "value": ind["value"],
+                    }
+                    for ind in analysis.get("indicators", [])
+                ],
+                signal_strength=0,
+                price_source=candidate_style,
+                pattern_accuracy=analysis.get("patternAccuracy"),
+            ),
+            SignalStatus.VALID,
+            datetime.fromtimestamp(now + (3 * TIMEFRAME_SECONDS.get(candidate_timeframe, 3600)), tz=timezone.utc),
+        )
+        response["timeframe"] = candidate_timeframe
+        response["trade_style"] = candidate_style
+        response["display_source"] = "fallback"
+        response["fallback_reason"] = (
+            f"Primary {timeframe} {trade_style} signal is HOLD; showing nearest actionable "
+            f"{candidate_timeframe} {candidate_style} setup."
+        )
+        return response
+
+    primary["display_source"] = "primary"
+    return primary
 
 
 def _persist_signal_outcome(sig: ActiveSignal, reason: str, exit_price: Optional[float]) -> None:
@@ -647,6 +747,7 @@ async def get_signal_breakdown(
     symbol: str,
     timeframe: str = Query("1h", description="Timeframe: 1m, 5m, 15m, 1h, 4h, 1d"),
     trade_style: str = Query("swing", pattern="^(scalp|swing)$"),
+    actionable: bool = Query(False, description="Return the nearest actionable fallback if the primary signal is HOLD"),
 ) -> dict:
     """Get detailed signal breakdown for a specific symbol.
 
@@ -655,6 +756,8 @@ async def get_signal_breakdown(
     """
     _cleanup_stale_signals()
     result = get_or_create_signal(symbol, timeframe, trade_style=trade_style)
+    if actionable:
+        result = _preferred_chart_signal(symbol, timeframe, trade_style, result)
 
     # Attach aiScore if not already present
     if "aiScore" not in result:

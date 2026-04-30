@@ -143,9 +143,9 @@ function Dashboard({
   }, [selectedPair.symbol, timeframe, tradeStyle])
 
   const fetchIntervalMs = (() => {
-    if (tradeStyle === 'scalp') return 5000
-    if (timeframe === '1m' || timeframe === '5m') return 5000
-    if (timeframe === '15m') return 10000
+    if (tradeStyle === 'scalp') return 10000
+    if (timeframe === '1m' || timeframe === '5m') return 10000
+    if (timeframe === '15m') return 15000
     return 30000
   })()
 
@@ -256,11 +256,18 @@ function Dashboard({
     loadCopySettings()
   }, [loadCopySettings])
 
-  // Fast quote polling keeps hero price reactive even when full analysis is slower.
+  // Fast quote polling keeps hero price reactive without duplicating full analysis cadence.
   useEffect(() => {
+    let cancelled = false
+    let inFlight = false
+    const quoteIntervalMs = Math.max(fetchIntervalMs, 15000)
+
     const fetchQuote = async () => {
+      if (inFlight) return
+      inFlight = true
       try {
         const data = await api.fetchQuote(selectedPair.symbol, quoteTimeframe, tradeStyle)
+        if (cancelled) return
         setCurrentPrice(data.currentPrice)
         setPriceChange(data.priceChange)
         setPriceChangePercent(data.priceChangePercent)
@@ -269,14 +276,19 @@ function Dashboard({
         setLastSuccessfulFetch(Date.now())
         setFetchError(null)
       } catch {
-        setFetchError('Unable to refresh live quote')
+        if (!cancelled) setFetchError('Unable to refresh live quote')
+      } finally {
+        inFlight = false
       }
     }
 
     fetchQuote()
-    const interval = setInterval(fetchQuote, fetchIntervalMs)
-    return () => clearInterval(interval)
-  }, [selectedPair, quoteTimeframe, fetchIntervalMs, tradeStyle])
+    const interval = setInterval(fetchQuote, quoteIntervalMs)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [selectedPair.symbol, quoteTimeframe, fetchIntervalMs, tradeStyle])
 
   useEffect(() => {
     if (selectedPair.symbol !== 'XAU/USD') {
@@ -329,7 +341,12 @@ function Dashboard({
 
   // Fetch full market analysis when pair or timeframe changes
   useEffect(() => {
+    let cancelled = false
+    let inFlight = false
+
     const fetchAllData = async () => {
+      if (inFlight) return
+      inFlight = true
       setIsLoading(true)
       try {
         const [analysisRes, signalRes] = await Promise.allSettled([
@@ -340,6 +357,7 @@ function Dashboard({
         // Process analysis result
         if (analysisRes.status === 'fulfilled' && analysisRes.value.ok) {
           const data = await analysisRes.value.json()
+          if (cancelled) return
           setSourceMetadata(data.sourceMetadata ?? null)
           setSignalDetails({
             signal: data.signal,
@@ -366,6 +384,7 @@ function Dashboard({
         // Process signal breakdown result
         if (signalRes.status === 'fulfilled' && signalRes.value.ok) {
           const data = await signalRes.value.json()
+          if (cancelled) return
           const marker: ChartSignalMarker = {
             entry: (data.entry_min + data.entry_max) / 2,
             entryMin: data.entry_min,
@@ -391,6 +410,7 @@ function Dashboard({
             confidence: data.confidence,
           })
         } else {
+          if (cancelled) return
           setChartSignals([])
           setSignalStatus(null)
           setActiveSignalMeta(null)
@@ -400,16 +420,20 @@ function Dashboard({
         setFetchError(null)
       } catch (err) {
         console.error('Failed to fetch data:', err)
-        setFetchError('Unable to refresh market data')
+        if (!cancelled) setFetchError('Unable to refresh market data')
       } finally {
-        setIsLoading(false)
+        inFlight = false
+        if (!cancelled) setIsLoading(false)
       }
     }
 
     fetchAllData()
     const interval = setInterval(fetchAllData, fetchIntervalMs)
-    return () => clearInterval(interval)
-  }, [selectedPair, effectiveAnalysisTimeframe, tradeStyle, fetchIntervalMs])
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [selectedPair.symbol, effectiveAnalysisTimeframe, tradeStyle, fetchIntervalMs])
 
   useEffect(() => {
     let isMounted = true
@@ -529,6 +553,7 @@ function Dashboard({
           quantity: liveQuantity,
           order_type: 'market',
           price: null,
+          signal_id: activeSignalMeta?.signalId ?? null,
         })
         setTradeStatus({
           type: 'success',
@@ -865,8 +890,8 @@ function Dashboard({
           {/* TradingView Data Status */}
           <div className="flex items-center gap-2 px-3 py-1.5 bg-trading-card border border-trading-border rounded-md text-xs text-slate-300">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="font-medium">TradingView Live</span>
-            <span className="text-slate-500">· Real-time market data</span>
+            <span className="font-medium">Chart feed: TradingView</span>
+            <span className="text-slate-500">· Signal feed: backend {selectedPair.symbol} {effectiveAnalysisTimeframe.toUpperCase()} {tradeStyle}</span>
           </div>
 
           {fetchError && (
@@ -890,6 +915,10 @@ function Dashboard({
                   pair={selectedPair}
                   timeframe={timeframe}
                   signals={chartSignals}
+                  tradeStyle={tradeStyle}
+                  signalTimeframe={effectiveAnalysisTimeframe}
+                  signalTradeStyle={tradeStyle}
+                  signalMode="strict"
                 />
               </ChartErrorBoundary>
             </div>

@@ -4,6 +4,7 @@ import {
   ArrowRight,
   Bell,
   BookmarkPlus,
+  Bot,
   ChevronDown,
   ChevronUp,
   Download,
@@ -15,6 +16,7 @@ import {
   RefreshCw,
   Search,
   SlidersHorizontal,
+  Sparkles,
 } from 'lucide-react'
 import ScannerBuilder from '../components/ScannerBuilder'
 import ScannerPresets from '../components/ScannerPresets'
@@ -28,6 +30,7 @@ import type { ForexPair, ScannerTimeframe } from '../types'
 interface ScannerProps {
   onPairChange?: (pair: ForexPair) => void
   onOpenDashboard?: () => void
+  onOpenLiveTrading?: () => void
   onOpenBacktest?: () => void
   onAddToWatchlist?: (pair: ForexPair) => void
   activeWatchlistSymbols?: string[]
@@ -113,6 +116,7 @@ function conditionSummaryText(
 export default function Scanner({
   onPairChange,
   onOpenDashboard,
+  onOpenLiveTrading,
   onOpenBacktest,
   onAddToWatchlist,
   activeWatchlistSymbols,
@@ -125,9 +129,10 @@ export default function Scanner({
 
   // Layout state
   const [configExpanded, setConfigExpanded] = useState(true)
-  const [configTab, setConfigTab] = useState<'builder' | 'presets'>('builder')
+  const [configTab, setConfigTab] = useState<'builder' | 'presets'>('presets')
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [expandedIndicators, setExpandedIndicators] = useState<Set<string>>(new Set())
+  const [activeScannerKey, setActiveScannerKey] = useState<string>('custom')
   const menuRef = useRef<HTMLDivElement>(null)
 
   const { toasts, showToast, dismissToast } = useSimpleToast()
@@ -223,6 +228,7 @@ export default function Scanner({
 
   const handleApplyPreset = (preset: (typeof presets)[number]) => {
     applyPreset(preset)
+    setActiveScannerKey(`preset:${preset.id}`)
     setConfigTab('builder')
     setConfigExpanded(true)
     showToast({ title: `${preset.name} loaded`, message: 'Review the rules or run the scanner.', tone: 'success' })
@@ -230,9 +236,16 @@ export default function Scanner({
 
   const handleLoadSaved = (scanner: (typeof savedScanners)[number]) => {
     loadSavedScanner(scanner)
+    setActiveScannerKey(`saved:${scanner.id}`)
     setConfigTab('builder')
     setConfigExpanded(true)
     showToast({ title: `${scanner.name} loaded`, message: 'Saved scanner restored.', tone: 'info' })
+  }
+
+  const handleResetScanner = () => {
+    resetScanner()
+    setActiveScannerKey('custom')
+    setConfigTab('presets')
   }
 
   const handleDeleteSaved = async (scannerId: number) => {
@@ -264,7 +277,8 @@ export default function Scanner({
     const pair = ALL_FOREX_PAIRS.find((item) => item.symbol === symbol)
     if (pair && onPairChange) {
       onPairChange(pair)
-      showToast({ title: `${symbol} selected`, message: 'Navigate to dashboard or live trading.', tone: 'info' })
+      onOpenLiveTrading?.()
+      showToast({ title: `${symbol} selected`, message: 'Opening live trading dashboard.', tone: 'info' })
     }
   }
 
@@ -341,7 +355,7 @@ export default function Scanner({
         {/* Right side: config summary */}
         <div className="hidden items-center gap-3 text-xs text-trading-muted lg:flex">
           <span>
-            {config.conditions.length} rules &middot; {config.logic} &middot; {config.trade_style}
+            Using {config.name?.trim() || 'Custom Scanner'} &middot; {config.conditions.length} rules &middot; {config.logic}
           </span>
           {lastRunAt ? (
             <>
@@ -358,6 +372,39 @@ export default function Scanner({
       {/* ── Main scrollable area ── */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1400px] px-4 py-4 sm:px-6 sm:py-5">
+          <div className="mb-4 overflow-hidden rounded-2xl border border-trading-border bg-trading-card">
+            <div className="relative px-4 py-4 sm:px-5">
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.20),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.12),transparent_32%)]" />
+              <div className="relative flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="max-w-3xl">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-trading-accent">
+                    <Sparkles size={14} />
+                    Scanner control room
+                  </div>
+                  <h2 className="mt-2 text-2xl font-black tracking-tight text-trading-text sm:text-3xl">
+                    Pick a bot, scan the market, then trade the strongest setups.
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-trading-muted">
+                    Instead of one generic scanner, this page now works like a scanner desk: choose Trend, Momentum, Volatility, Volume, or your own saved bot profile.
+                  </p>
+                </div>
+                <div className="grid min-w-[260px] grid-cols-3 gap-2">
+                  <div className="rounded-xl border border-trading-border bg-trading-bg/70 p-3">
+                    <div className="text-[10px] uppercase tracking-wider text-trading-muted">Active bot</div>
+                    <div className="mt-1 truncate text-sm font-bold text-trading-text">{config.name?.trim() || 'Custom'}</div>
+                  </div>
+                  <div className="rounded-xl border border-trading-border bg-trading-bg/70 p-3">
+                    <div className="text-[10px] uppercase tracking-wider text-trading-muted">Library</div>
+                    <div className="mt-1 text-sm font-bold text-trading-text">{presets.length + savedScanners.length}</div>
+                  </div>
+                  <div className="rounded-xl border border-trading-border bg-trading-bg/70 p-3">
+                    <div className="text-[10px] uppercase tracking-wider text-trading-muted">Scope</div>
+                    <div className="mt-1 text-sm font-bold text-trading-text">{pairCount}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
 
           {/* ── Collapsible configuration section ── */}
           <div className="mb-4 rounded-lg border border-trading-border bg-trading-card">
@@ -367,7 +414,7 @@ export default function Scanner({
               className="flex w-full items-center justify-between px-4 py-2.5"
             >
               <div className="flex items-center gap-3">
-                <SlidersHorizontal size={16} className="text-trading-accent" />
+                {configTab === 'presets' ? <Bot size={16} className="text-trading-accent" /> : <SlidersHorizontal size={16} className="text-trading-accent" />}
                 <span className="text-sm font-semibold text-trading-text">
                   {config.name?.trim() || 'Custom Scanner'}
                 </span>
@@ -423,7 +470,10 @@ export default function Scanner({
                       <input
                         type="text"
                         value={config.name || ''}
-                        onChange={(e) => setScannerName(e.target.value)}
+                        onChange={(e) => {
+                          setScannerName(e.target.value)
+                          setActiveScannerKey('custom')
+                        }}
                         placeholder="Scanner name (e.g. London session breakout)"
                         className="mb-4 w-full rounded-md border border-trading-border bg-trading-bg px-3 py-2 text-sm text-trading-text placeholder:text-trading-muted focus:border-trading-accent focus:outline-none"
                       />
@@ -440,7 +490,7 @@ export default function Scanner({
                           selectedPairs={selectedPairs}
                           onPairsChange={setSelectedPairs}
                           onRunScan={handleRunScan}
-                          onReset={resetScanner}
+                          onReset={handleResetScanner}
                           isScanning={loading}
                           allPairs={allPairs}
                           supportedIndicators={supportedIndicators}
@@ -459,6 +509,7 @@ export default function Scanner({
                       savedScanners={savedScanners}
                       loading={loadingMetadata}
                       loadingSaved={loadingSaved}
+                      activeScannerKey={activeScannerKey}
                       onApplyPreset={handleApplyPreset}
                       onApplySaved={handleLoadSaved}
                       onDeleteSaved={handleDeleteSaved}

@@ -157,7 +157,7 @@ async def _automation_loop() -> None:
 
             signal = analysis.get("signal", "hold")
             confidence = float(analysis.get("confidence", 0))
-            if signal == "hold" or confidence < 70:
+            if signal == "hold" or confidence < 60:
                 repo.insert_automation_execution(active_id, symbol, "analyze", "skipped", {"reason": "signal_threshold", "signal": signal, "confidence": confidence})
                 _worker_status["lastRun"] = time.time()
                 await asyncio.sleep(5)

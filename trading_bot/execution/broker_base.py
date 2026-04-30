@@ -175,6 +175,24 @@ class BaseBroker(ABC):
             return True
         return False
 
+    async def modify_trade(
+        self,
+        trade_id: str,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+    ) -> bool:
+        """Modify stop loss and/or take profit on an open trade.
+
+        Args:
+            trade_id: Broker-specific trade/position identifier
+            stop_loss: New stop loss price (None to leave unchanged)
+            take_profit: New take profit price (None to leave unchanged)
+
+        Returns:
+            True if modification was successful
+        """
+        raise NotImplementedError("modify_trade not supported by this broker")
+
     async def get_trade_history(
         self,
         count: int = 50,

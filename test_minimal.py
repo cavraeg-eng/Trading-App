@@ -81,11 +81,16 @@ total_lines = 0
 total_files = 0
 
 for py_file in base_path.rglob("*.py"):
-    if ".qoder" not in str(py_file):
-        with open(py_file, 'r') as f:
+    path_text = str(py_file)
+    if any(part in path_text for part in (".qoder", ".venv", "venv", "__pycache__")):
+        continue
+    try:
+        with open(py_file, 'r', encoding='utf-8') as f:
             lines = len(f.readlines())
-            total_lines += lines
-            total_files += 1
+    except UnicodeDecodeError:
+        continue
+    total_lines += lines
+    total_files += 1
 
 print(f"   Total Python files: {total_files}")
 print(f"   Total lines of code: {total_lines:,}")

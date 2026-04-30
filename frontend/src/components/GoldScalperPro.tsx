@@ -50,6 +50,7 @@ function GoldScalperPro({ accountBalance, onExecuteTrade, onActivateGoldMode }: 
 
   /* ── Data fetching ── */
   const fetchScalpData = useCallback(async () => {
+    if (!isExpanded) return
     setIsLoading(true)
     try {
       const res = await fetch(
@@ -88,13 +89,14 @@ function GoldScalperPro({ accountBalance, onExecuteTrade, onActivateGoldMode }: 
     } finally {
       setIsLoading(false)
     }
-  }, [scalpTF])
+  }, [isExpanded, scalpTF])
 
   useEffect(() => {
+    if (!isExpanded) return
     fetchScalpData()
-    const id = setInterval(fetchScalpData, 2000)
+    const id = setInterval(fetchScalpData, 10000)
     return () => clearInterval(id)
-  }, [fetchScalpData])
+  }, [fetchScalpData, isExpanded])
 
   useEffect(() => {
     if (isExpanded) {

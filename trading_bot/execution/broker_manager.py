@@ -13,6 +13,7 @@ from trading_bot.execution.broker_base import (
     OrderSide,
     OrderType,
 )
+from trading_bot.execution import trade_ledger
 from trading_bot.persistence import repositories as repo
 
 logger = get_logger(__name__)
@@ -228,7 +229,7 @@ class BrokerManager:
             return None
 
         try:
-            return await broker.place_order(
+            order = await broker.place_order(
                 symbol,
                 side,
                 quantity,
@@ -239,6 +240,8 @@ class BrokerManager:
                 take_profit_2=take_profit_2,
                 take_profit_3=take_profit_3,
             )
+            trade_ledger.upsert_order(broker_id, order)
+            return order
         except BrokerOperationError:
             raise
         except TimeoutError as e:
@@ -276,7 +279,16 @@ class BrokerManager:
             return False
 
         try:
-            return await broker.cancel_order(order_id)
+            success = await broker.cancel_order(order_id)
+            if success:
+                repo.update_trade_ledger_status(
+                    broker_id,
+                    "order",
+                    order_id,
+                    "cancelled",
+                    {"event": "cancelled"},
+                )
+            return success
         except Exception as e:
             logger.error(f"Failed to cancel order with {broker_id}: {e}")
             return False
@@ -300,7 +312,9 @@ class BrokerManager:
             return []
 
         try:
-            return await broker.get_positions()
+            positions = await broker.get_positions()
+            trade_ledger.reconcile_positions(broker_id, positions)
+            return positions
         except Exception as e:
             logger.error(f"Failed to get positions from {broker_id}: {e}")
             return []
@@ -349,7 +363,10 @@ class BrokerManager:
             return None
 
         try:
-            return await broker.get_order_status(order_id)
+            order = await broker.get_order_status(order_id)
+            if order:
+                trade_ledger.upsert_order(broker_id, order)
+            return order
         except Exception as e:
             logger.error(f"Failed to get order status from {broker_id}: {e}")
             return None
@@ -382,7 +399,9 @@ class BrokerManager:
             return []
 
         try:
-            return await broker.get_orders(count=count, symbol=symbol, status=status)
+            orders = await broker.get_orders(count=count, symbol=symbol, status=status)
+            trade_ledger.reconcile_orders(broker_id, orders)
+            return orders
         except Exception as e:
             logger.error(f"Failed to get orders from {broker_id}: {e}")
             return []
@@ -413,10 +432,67 @@ class BrokerManager:
             return False
 
         try:
-            return await broker.close_position(symbol, position_id=position_id)
+            success = await broker.close_position(symbol, position_id=position_id)
+            if success and position_id:
+                repo.update_trade_ledger_status(
+                    broker_id,
+                    "position",
+                    position_id,
+                    "closed",
+                    {"event": "closed_position", "symbol": symbol},
+                )
+            return success
         except Exception as e:
             logger.error(f"Failed to close position with {broker_id}: {e}")
             return False
+
+    async def modify_trade(
+        self,
+        broker_id: str,
+        trade_id: str,
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+    ) -> bool:
+        """Modify stop loss and/or take profit on an open trade.
+
+        Args:
+            broker_id: Broker identifier
+            trade_id: Trade/position identifier
+            stop_loss: New stop loss price
+            take_profit: New take profit price
+
+        Returns:
+            True if modification was successful
+        """
+        broker = self._brokers.get(broker_id)
+        if not broker:
+            raise BrokerOperationError(
+                detail=f"Broker '{broker_id}' not found",
+                category="not_found",
+                status_code=404,
+            )
+
+        if not broker.connected:
+            raise BrokerOperationError(
+                detail=f"Broker '{broker_id}' is not connected",
+                category="not_connected",
+                status_code=400,
+            )
+
+        success = await broker.modify_trade(
+            trade_id=trade_id,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+        )
+        if success:
+            repo.update_trade_ledger_status(
+                broker_id,
+                "trade",
+                trade_id,
+                "open",
+                {"event": "modified_trade", "stop_loss": stop_loss, "take_profit": take_profit},
+            )
+        return success
 
     async def get_trade_history(
         self, broker_id: str, count: int = 50, symbol: Optional[str] = None
@@ -441,7 +517,9 @@ class BrokerManager:
             return []
 
         try:
-            return await broker.get_trade_history(count=count, symbol=symbol)
+            trades = await broker.get_trade_history(count=count, symbol=symbol)
+            trade_ledger.reconcile_history(broker_id, trades)
+            return trades
         except Exception as e:
             logger.error(f"Failed to get trade history from {broker_id}: {e}")
             return []

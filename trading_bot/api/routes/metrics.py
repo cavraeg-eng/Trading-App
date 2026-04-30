@@ -17,3 +17,13 @@ async def get_signal_metrics(
 ) -> dict:
     """Get aggregated signal prediction accuracy metrics from stored outcomes."""
     return repo.get_signal_metrics(symbol=symbol, timeframe=timeframe, limit=limit)
+
+
+@router.get("/ledger")
+async def get_ledger_metrics(
+    broker_id: Optional[str] = Query(None),
+    symbol: Optional[str] = Query(None),
+    limit: int = Query(500, ge=1, le=2000),
+) -> dict:
+    """Get live broker ledger performance metrics including MFE/MAE and R multiples."""
+    return repo.get_trade_ledger_metrics(broker_id=broker_id, symbol=symbol, limit=limit)
