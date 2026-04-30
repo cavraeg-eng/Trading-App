@@ -10,6 +10,11 @@ from trading_bot.config import get_logger
 from trading_bot.execution.broker_base import OrderSide, OrderType
 from trading_bot.execution.broker_manager import BrokerOperationError, broker_manager
 from trading_bot.persistence import repositories as repo
+from trading_bot.services.automation_safety import (
+    validate_live_execution_gate,
+    validate_live_risk_constraints,
+    validate_signal_quality,
+)
 from trading_bot.services.strategy_registry import get_strategy
 
 logger = get_logger(__name__)
@@ -93,6 +98,24 @@ async def _automation_loop() -> None:
                 await asyncio.sleep(5)
                 continue
 
+            live_gate = validate_live_execution_gate(
+                mode=_worker_mode,
+                active_mode=active_mode,
+                broker_id=_worker_broker_id,
+                broker_manager=broker_manager,
+            )
+            if not live_gate.allowed:
+                repo.insert_automation_execution(
+                    active_id,
+                    "unknown",
+                    "execute",
+                    "skipped",
+                    {"reason": live_gate.reason, **live_gate.detail},
+                )
+                _worker_status["lastRun"] = time.time()
+                await asyncio.sleep(5)
+                continue
+
             strategy = get_strategy(active_id)
             if not strategy:
                 repo.insert_automation_execution(active_id or "unknown", "unknown", "analyze", "skipped", {"reason": "strategy_not_found"})
@@ -116,6 +139,7 @@ async def _automation_loop() -> None:
                 broker_positions = await broker_manager.get_positions(_worker_broker_id)
                 open_positions = [p for p in broker_positions if p.symbol == strategy["symbol"]]
             else:
+                broker_positions = []
                 open_positions = [p for p in repo.get_paper_positions() if p.get("strategy_id") == active_id]
             if len(open_positions) >= max_positions:
                 repo.insert_automation_execution(active_id, strategy["symbol"], "analyze", "skipped", {"reason": "max_positions_reached", "openPositions": len(open_positions)})
@@ -155,10 +179,11 @@ async def _automation_loop() -> None:
                 await asyncio.sleep(5)
                 continue
 
-            signal = analysis.get("signal", "hold")
+            signal = str(analysis.get("signal", "hold")).lower()
             confidence = float(analysis.get("confidence", 0))
-            if signal == "hold" or confidence < 60:
-                repo.insert_automation_execution(active_id, symbol, "analyze", "skipped", {"reason": "signal_threshold", "signal": signal, "confidence": confidence})
+            signal_quality = validate_signal_quality(analysis)
+            if not signal_quality.allowed:
+                repo.insert_automation_execution(active_id, symbol, "analyze", "skipped", {"reason": signal_quality.reason, **signal_quality.detail})
                 _worker_status["lastRun"] = time.time()
                 await asyncio.sleep(5)
                 continue
@@ -171,11 +196,6 @@ async def _automation_loop() -> None:
                 continue
 
             current_price = float(analysis.get("currentPrice", 0))
-            if current_price <= 0:
-                repo.insert_automation_execution(active_id, symbol, "analyze", "skipped", {"reason": "invalid_price"})
-                _worker_status["lastRun"] = time.time()
-                await asyncio.sleep(5)
-                continue
 
             signal_key = f"{active_id}:{symbol}:{trade_style}:{signal}:{round(current_price, 2)}"
             if _last_signal_key == signal_key:
@@ -228,6 +248,22 @@ async def _automation_loop() -> None:
                     await asyncio.sleep(5)
                     continue
                 quantity = _calculate_live_units(symbol, account_balance, allocation_percent, current_price, stop_loss)
+                risk_gate = validate_live_risk_constraints(
+                    symbol=symbol,
+                    side=side,
+                    quantity=quantity,
+                    current_price=current_price,
+                    stop_loss=stop_loss,
+                    balance=balance_obj,
+                    positions=broker_positions,
+                    allocation_percent=allocation_percent,
+                    max_positions=max_positions,
+                )
+                if not risk_gate.allowed:
+                    repo.insert_automation_execution(active_id, symbol, "execute", "skipped", {"reason": risk_gate.reason, **risk_gate.detail})
+                    _worker_status["lastRun"] = time.time()
+                    await asyncio.sleep(5)
+                    continue
                 order_side = OrderSide.BUY if side == "buy" else OrderSide.SELL
                 try:
                     broker_order = await broker_manager.place_order(
@@ -260,6 +296,7 @@ async def _automation_loop() -> None:
                     "mode": "live",
                     "broker_id": _worker_broker_id,
                     "order_id": broker_order.order_id,
+                    "riskCheck": risk_gate.detail,
                     "entryMin": entry_min,
                     "entryMax": entry_max,
                     "stopLoss": stop_loss,

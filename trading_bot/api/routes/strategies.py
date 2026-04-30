@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from trading_bot.execution.broker_manager import broker_manager
 from trading_bot.persistence import repositories as repo
+from trading_bot.services.automation_safety import validate_live_execution_gate
 from trading_bot.services.automation_worker import get_worker_mode, get_worker_status, start_worker, stop_worker
 from trading_bot.services.strategy_registry import get_strategy, list_strategies
 
@@ -142,6 +143,22 @@ async def start_automation_worker(
     mode: Optional[str] = Query("paper", description="Execution mode: paper or live"),
     broker_id: Optional[str] = Query(None, description="Broker ID for live mode"),
 ) -> dict:
+    active_mode = repo.get_setting("active_strategy_mode", "paper")
+    gate = validate_live_execution_gate(
+        mode=mode or "paper",
+        active_mode=active_mode,
+        broker_id=broker_id,
+        broker_manager=broker_manager,
+    )
+    if not gate.allowed:
+        repo.insert_automation_execution(
+            repo.get_setting("active_strategy_id", "") or "system",
+            "system",
+            "worker",
+            "skipped",
+            {"reason": gate.reason, **gate.detail},
+        )
+        raise HTTPException(status_code=400, detail={"reason": gate.reason, **gate.detail})
     # Validate live mode requirements
     if mode == "live":
         if not broker_id:
