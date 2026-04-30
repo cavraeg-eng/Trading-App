@@ -13,11 +13,17 @@ _local = threading.local()
 _DEFAULT_DB_PATH = Path("./data/trading_bot.db")
 _REQUIRED_TABLES = {
     "app_settings",
-    "paper_account",
-    "paper_orders",
+    "automation_executions",
     "copy_settings",
     "copy_trades",
+    "model_registry",
+    "paper_account",
+    "paper_orders",
+    "saved_scanners",
+    "service_health_snapshots",
+    "signal_outcomes",
     "signal_predictions",
+    "smart_alerts",
     "trade_ledger_entries",
 }
 
@@ -216,7 +222,8 @@ def _apply_schema(conn: sqlite3.Connection, path: Path) -> None:
         conn.rollback()
         raise PersistenceError(
             f"Failed to initialize SQLite schema at '{path}'. "
-            "Delete the local runtime database to recreate it, or inspect the schema migration error."
+            "Inspect the schema migration error; if the local runtime database remains unusable, "
+            "delete it so it can be recreated."
         ) from exc
 
 
