@@ -351,7 +351,7 @@ function TradingChart({
 
   const activeLevelLines = useMemo<OverlayLine[]>(() => {
     if (!activePosition) return [];
-    if (latestSignal?.setupStatus === 'active') return [];
+    if (latestSignal?.setupStatus === 'active' || latestSignal?.setupStatus === 'pending') return [];
     const status = activePosition.status ?? 'active';
     const lines: OverlayLine[] = [];
 
