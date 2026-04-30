@@ -403,19 +403,33 @@ export interface SignalPost {
 // Signal validity status
 export type SignalStatus = 'OPTIMAL_ENTRY' | 'VALID' | 'ABOUT_TO_EXPIRE' | 'EXPIRED';
 
+export type TradeLevelOverlayKind = 'entry' | 'stop_loss' | 'take_profit' | 'current' | 'exit';
+export type TradeLevelOverlayStatus = 'active' | 'pending' | 'closed';
+
+export interface TradeLevelOverlay {
+  id: string;
+  kind: TradeLevelOverlayKind;
+  label: string;
+  price: number | null | undefined;
+  status: TradeLevelOverlayStatus;
+  direction?: 'BUY' | 'SELL' | 'HOLD';
+  targetIndex?: number;
+}
+
 // Chart signal marker for overlay on Lightweight Charts
 export interface ChartSignalMarker {
-  entry: number;
-  entryMin: number;
-  entryMax: number;
-  stopLoss: number;
-  takeProfit1: number;
-  takeProfit2: number;
-  takeProfit3: number;
+  entry?: number | null;
+  entryMin?: number | null;
+  entryMax?: number | null;
+  stopLoss?: number | null;
+  takeProfit1?: number | null;
+  takeProfit2?: number | null;
+  takeProfit3?: number | null;
   signalId?: string;
   direction: 'BUY' | 'SELL' | 'HOLD';
   timestamp: string; // ISO format
   status: SignalStatus;
+  setupStatus?: TradeLevelOverlayStatus;
   confidence: number; // 0-100
   symbol: string;
   expiresAt?: string; // ISO format
@@ -575,6 +589,7 @@ export interface ActivePositionOverlay {
   unrealizedPnl: number;
   quantity: number;
   positionId?: string;
+  status?: TradeLevelOverlayStatus;
   stopLoss?: number;
   takeProfit1?: number;
   takeProfit2?: number;
@@ -588,6 +603,10 @@ export interface GhostTradeOverlay {
   side: 'buy' | 'sell';
   realizedPnl: number;
   symbol: string;
+  stopLoss?: number;
+  takeProfit1?: number;
+  takeProfit2?: number;
+  takeProfit3?: number;
 }
 
 // Signal backtest result from POST /api/backtest/signal

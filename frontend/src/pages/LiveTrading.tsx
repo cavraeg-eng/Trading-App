@@ -61,6 +61,10 @@ interface TradeHistoryItem {
   opened_at: string
   closed_at: string
   state: string
+  stop_loss?: number | null
+  take_profit_1?: number | null
+  take_profit_2?: number | null
+  take_profit_3?: number | null
 }
 
 interface BrokerBalance {
@@ -248,6 +252,10 @@ function ledgerEntryToHistory(entry: TradeLedgerEntry): TradeHistoryItem {
     opened_at: entry.opened_at ?? entry.updated_at,
     closed_at: entry.closed_at ?? entry.updated_at,
     state: entry.status,
+    stop_loss: entry.stop_loss,
+    take_profit_1: entry.take_profit_1,
+    take_profit_2: entry.take_profit_2,
+    take_profit_3: entry.take_profit_3,
   }
 }
 
@@ -798,6 +806,10 @@ function LiveTrading({
         side: trade.side as 'buy' | 'sell',
         realizedPnl: trade.realized_pnl,
         symbol: trade.symbol,
+        stopLoss: trade.stop_loss != null && trade.stop_loss > 0 ? trade.stop_loss : undefined,
+        takeProfit1: trade.take_profit_1 != null && trade.take_profit_1 > 0 ? trade.take_profit_1 : undefined,
+        takeProfit2: trade.take_profit_2 != null && trade.take_profit_2 > 0 ? trade.take_profit_2 : undefined,
+        takeProfit3: trade.take_profit_3 != null && trade.take_profit_3 > 0 ? trade.take_profit_3 : undefined,
       })
       setSelectedPositionId(null)
       setSelectedOrderId(null)
@@ -940,6 +952,7 @@ function LiveTrading({
       unrealizedPnl: pos.unrealized_pnl,
       quantity: pos.quantity,
       positionId: pos.position_id ?? undefined,
+      status: 'active',
       stopLoss: matchingOrder?.stop_loss != null && matchingOrder.stop_loss > 0 ? matchingOrder.stop_loss : undefined,
       takeProfit1: matchingOrder?.take_profit_1 != null && matchingOrder.take_profit_1 > 0 ? matchingOrder.take_profit_1 : undefined,
       takeProfit2: matchingOrder?.take_profit_2 != null && matchingOrder.take_profit_2 > 0 ? matchingOrder.take_profit_2 : undefined,
@@ -953,12 +966,14 @@ function LiveTrading({
     const order = orders.find(o => o.order_id === selectedOrderId)
     if (!order) return null
     const price = order.avg_fill_price || order.price || 0
+    const orderStatus = order.status.toLowerCase()
     return {
       entryPrice: price,
       currentPrice: price,
       side: order.side === 'buy' ? 'long' : 'short',
       unrealizedPnl: 0,
       quantity: order.quantity,
+      status: ['filled', 'partially_filled'].includes(orderStatus) ? 'active' : 'pending',
       stopLoss: order.stop_loss != null && order.stop_loss > 0 ? order.stop_loss : undefined,
       takeProfit1: order.take_profit_1 != null && order.take_profit_1 > 0 ? order.take_profit_1 : undefined,
       takeProfit2: order.take_profit_2 != null && order.take_profit_2 > 0 ? order.take_profit_2 : undefined,
@@ -1028,6 +1043,9 @@ function LiveTrading({
 
       const hasAnyLevel = entry > 0 || stopLoss > 0 || takeProfit1 > 0
       if (hasAnyLevel) {
+        const setupStatus = hasOpenPosition || ['filled', 'partially_filled', 'open'].includes(activeOrder?.status.toLowerCase() ?? activeLedgerEntry?.status.toLowerCase() ?? '')
+          ? 'active' as const
+          : 'pending' as const
         return {
           source: 'active' as const,
           signals: [{
@@ -1042,6 +1060,7 @@ function LiveTrading({
             direction,
             timestamp: activeOrder?.updated_at || activeOrder?.created_at || activeLedgerEntry?.updated_at || new Date().toISOString(),
             status: 'VALID' as const,
+            setupStatus,
             confidence: 100,
             symbol: selectedPair.symbol,
             expiresAt: undefined,

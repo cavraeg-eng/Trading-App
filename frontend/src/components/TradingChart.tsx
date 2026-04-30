@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, memo, Component, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
-import type { ForexPair, ChartSignalMarker, ActivePositionOverlay, GhostTradeOverlay } from '../types';
+import type {
+  ForexPair,
+  ChartSignalMarker,
+  ActivePositionOverlay,
+  GhostTradeOverlay,
+  TradeLevelOverlayKind,
+  TradeLevelOverlayStatus,
+} from '../types';
 import { getTradingViewSymbol, getTradingViewInterval } from '../config/forexPairs';
 import { api } from '../lib/api';
 
@@ -17,6 +24,8 @@ interface TradingChartProps {
   activePosition?: ActivePositionOverlay | null;
   ghostTrade?: GhostTradeOverlay | null;
 }
+
+const EMPTY_TRADE_LEVELS: ChartSignalMarker[] = [];
 
 const BAR_DURATION_MS: Record<string, number> = {
   '1m': 60_000,
@@ -40,10 +49,13 @@ interface OverlayLine {
   key: string;
   label: string;
   value: number;
+  kind: TradeLevelOverlayKind;
+  status: TradeLevelOverlayStatus;
   lineClassName: string;
   badgeClassName: string;
   dashed?: boolean;
   stripeClassName?: string;
+  opacityClassName?: string;
 }
 
 function isFinitePrice(value: number | null | undefined): value is number {
@@ -52,6 +64,121 @@ function isFinitePrice(value: number | null | undefined): value is number {
 
 function clampPercent(value: number) {
   return Math.min(Math.max(value, 0), 100);
+}
+
+function getSignalSetupStatus(signal: ChartSignalMarker): TradeLevelOverlayStatus {
+  if (signal.setupStatus) return signal.setupStatus;
+  if (signal.status === 'EXPIRED') return 'closed';
+  return 'pending';
+}
+
+function getOverlayStatusClasses(status: TradeLevelOverlayStatus) {
+  if (status === 'active') {
+    return {
+      dashed: false,
+      opacityClassName: 'opacity-100',
+      suffixClassName: 'bg-emerald-500/15 text-emerald-200 border border-emerald-400/20',
+    };
+  }
+
+  if (status === 'closed') {
+    return {
+      dashed: true,
+      opacityClassName: 'opacity-45',
+      suffixClassName: 'bg-slate-500/15 text-slate-300 border border-slate-400/15',
+    };
+  }
+
+  return {
+    dashed: true,
+    opacityClassName: 'opacity-70',
+    suffixClassName: 'bg-amber-500/15 text-amber-200 border border-amber-400/20',
+  };
+}
+
+function getOverlayLineClasses(kind: TradeLevelOverlayKind, status: TradeLevelOverlayStatus) {
+  const statusClasses = getOverlayStatusClasses(status);
+  const classesByKind = {
+    entry: {
+      lineClassName: 'border-[#4fc3f7]/65',
+      badgeClassName: 'bg-[#4fc3f7] text-[#0b0e14]',
+      stripeClassName: 'bg-[#4fc3f7]/70',
+    },
+    stop_loss: {
+      lineClassName: 'border-[#ef5350]/70',
+      badgeClassName: 'bg-[#ef5350] text-white',
+      stripeClassName: 'bg-[#ef5350]',
+    },
+    take_profit: {
+      lineClassName: 'border-[#66bb6a]/70',
+      badgeClassName: 'bg-[#66bb6a] text-[#0b0e14]',
+      stripeClassName: 'bg-[#66bb6a]',
+    },
+    current: {
+      lineClassName: 'border-slate-300/60',
+      badgeClassName: 'bg-slate-300 text-[#0b0e14]',
+      stripeClassName: 'bg-slate-300',
+    },
+    exit: {
+      lineClassName: 'border-orange-400/60',
+      badgeClassName: 'bg-orange-400 text-[#0b0e14]',
+      stripeClassName: 'bg-orange-400',
+    },
+  } satisfies Record<TradeLevelOverlayKind, {
+    lineClassName: string;
+    badgeClassName: string;
+    stripeClassName: string;
+  }>;
+
+  return {
+    ...classesByKind[kind],
+    dashed: statusClasses.dashed,
+    opacityClassName: statusClasses.opacityClassName,
+  };
+}
+
+function renderTradeLevelLine(
+  key: string,
+  kind: TradeLevelOverlayKind,
+  status: TradeLevelOverlayStatus,
+  label: string,
+  value: number,
+  formatPrice: (value: number) => string,
+  getPriceOffsetPercent: (value: number) => number,
+  labelPosition: 'left' | 'right' = 'right'
+) {
+  const style = getOverlayLineClasses(kind, status);
+  const statusStyle = getOverlayStatusClasses(status);
+  const labelPlacement = labelPosition === 'left'
+    ? 'left-1 rounded-sm'
+    : 'right-0 rounded-l-sm';
+
+  return (
+    <div
+      key={key}
+      className={`absolute left-0 right-0 -translate-y-1/2 ${style.opacityClassName}`}
+      style={{ top: `${getPriceOffsetPercent(value)}%` }}
+    >
+      <div className={`w-full border-t ${style.dashed ? 'border-dashed' : 'border-solid'} ${style.lineClassName}`} />
+      <div className={`absolute top-0 -translate-y-1/2 ${labelPlacement}`}>
+        <div className="flex items-center">
+          {labelPosition === 'right' && (
+            <span className={`mr-1 hidden rounded px-1 py-[1px] text-[8px] font-bold uppercase tracking-wide sm:inline ${statusStyle.suffixClassName}`}>
+              {status}
+            </span>
+          )}
+          <div className={`px-1.5 py-[2px] text-[9px] font-bold tabular-nums ${labelPlacement} ${style.badgeClassName}`}>
+            {label} {formatPrice(value)}
+          </div>
+          {labelPosition === 'left' && (
+            <span className={`ml-1 hidden rounded px-1 py-[1px] text-[8px] font-bold uppercase tracking-wide sm:inline ${statusStyle.suffixClassName}`}>
+              {status}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function inferTradeStyle(timeframe: string): 'scalp' | 'swing' {
@@ -119,6 +246,7 @@ function TradingChart({
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetRef = useRef<any>(null);
+  const safeSignals = signals ?? EMPTY_TRADE_LEVELS;
 
   // Style applied to all price-mapped overlay containers so they
   // align with the TradingView chart area (excludes header + time axis).
@@ -143,7 +271,7 @@ function TradingChart({
     formatCountdown(getRemainingBarCloseMs(effectiveTf))
   );
   const [candles, setCandles] = useState<CandlePoint[]>([]);
-  const latestSignal = signals?.[0];
+  const latestSignal = safeSignals[0];
   const formatPrice = (value: number) => value.toFixed(
     pair.basePriceApprox < 10 ? 5 : pair.basePriceApprox < 200 ? 3 : 2
   );
@@ -173,66 +301,89 @@ function TradingChart({
   const overlayLines = useMemo<OverlayLine[]>(() => {
     if (!latestSignal || latestSignal.direction === 'HOLD') return [];
 
+    const setupStatus = getSignalSetupStatus(latestSignal);
     const lines: OverlayLine[] = [];
 
     if (isFinitePrice(latestSignal.entry)) {
+      const style = getOverlayLineClasses('entry', setupStatus);
       lines.push({
         key: 'entry',
         label: 'Entry',
         value: latestSignal.entry,
-        lineClassName: 'border-[#4fc3f7]/60',
-        badgeClassName: 'bg-[#4fc3f7] text-[#0b0e14]',
-        dashed: true,
-        stripeClassName: 'bg-[#4fc3f7]/70',
+        kind: 'entry',
+        status: setupStatus,
+        ...style,
       });
     }
 
     if (isFinitePrice(latestSignal.stopLoss)) {
+      const style = getOverlayLineClasses('stop_loss', setupStatus);
       lines.push({
         key: 'stop-loss',
         label: 'SL',
         value: latestSignal.stopLoss,
-        lineClassName: 'border-[#ef5350]/60',
-        badgeClassName: 'bg-[#ef5350] text-white',
-        stripeClassName: 'bg-[#ef5350]',
+        kind: 'stop_loss',
+        status: setupStatus,
+        ...style,
       });
     }
 
-    if (isFinitePrice(latestSignal.takeProfit1)) {
+    [
+      latestSignal.takeProfit1,
+      latestSignal.takeProfit2,
+      latestSignal.takeProfit3,
+    ].forEach((price, index) => {
+      if (!isFinitePrice(price)) return;
+      const targetIndex = index + 1;
+      const style = getOverlayLineClasses('take_profit', setupStatus);
       lines.push({
-        key: 'take-profit-1',
-        label: 'TP1',
-        value: latestSignal.takeProfit1,
-        lineClassName: 'border-[#66bb6a]/60',
-        badgeClassName: 'bg-[#66bb6a] text-[#0b0e14]',
-        stripeClassName: 'bg-[#66bb6a]',
+        key: `take-profit-${targetIndex}`,
+        label: `TP${targetIndex}`,
+        value: price,
+        kind: 'take_profit',
+        status: setupStatus,
+        ...style,
       });
-    }
-
-    if (isFinitePrice(latestSignal.takeProfit2)) {
-      lines.push({
-        key: 'take-profit-2',
-        label: 'TP2',
-        value: latestSignal.takeProfit2,
-        lineClassName: 'border-[#66bb6a]/50',
-        badgeClassName: 'bg-[#4caf50] text-[#0b0e14]',
-        stripeClassName: 'bg-[#4caf50]',
-      });
-    }
-
-    if (isFinitePrice(latestSignal.takeProfit3)) {
-      lines.push({
-        key: 'take-profit-3',
-        label: 'TP3',
-        value: latestSignal.takeProfit3,
-        lineClassName: 'border-[#388e3c]/50',
-        badgeClassName: 'bg-[#388e3c] text-white',
-        stripeClassName: 'bg-[#388e3c]',
-      });
-    }
+    });
 
     return lines;
   }, [latestSignal]);
+
+  const activeLevelLines = useMemo<OverlayLine[]>(() => {
+    if (!activePosition) return [];
+    const status = activePosition.status ?? 'active';
+    const lines: OverlayLine[] = [];
+
+    if (isFinitePrice(activePosition.stopLoss)) {
+      lines.push({
+        key: 'active-stop-loss',
+        label: 'SL',
+        value: activePosition.stopLoss,
+        kind: 'stop_loss',
+        status,
+        ...getOverlayLineClasses('stop_loss', status),
+      });
+    }
+
+    [
+      activePosition.takeProfit1,
+      activePosition.takeProfit2,
+      activePosition.takeProfit3,
+    ].forEach((price, index) => {
+      if (!isFinitePrice(price)) return;
+      const targetIndex = index + 1;
+      lines.push({
+        key: `active-take-profit-${targetIndex}`,
+        label: `TP${targetIndex}`,
+        value: price,
+        kind: 'take_profit',
+        status,
+        ...getOverlayLineClasses('take_profit', status),
+      });
+    });
+
+    return lines;
+  }, [activePosition]);
 
   const overlayPriceRange = useMemo(() => {
     const pricePoints: number[] = [];
@@ -275,6 +426,10 @@ function TradingChart({
     if (ghostTrade) {
       if (isFinitePrice(ghostTrade.entryPrice)) pricePoints.push(ghostTrade.entryPrice);
       if (isFinitePrice(ghostTrade.exitPrice)) pricePoints.push(ghostTrade.exitPrice);
+      if (isFinitePrice(ghostTrade.stopLoss)) pricePoints.push(ghostTrade.stopLoss);
+      if (isFinitePrice(ghostTrade.takeProfit1)) pricePoints.push(ghostTrade.takeProfit1);
+      if (isFinitePrice(ghostTrade.takeProfit2)) pricePoints.push(ghostTrade.takeProfit2);
+      if (isFinitePrice(ghostTrade.takeProfit3)) pricePoints.push(ghostTrade.takeProfit3);
     }
 
     if (!pricePoints.length) return null;
@@ -463,14 +618,19 @@ function TradingChart({
           {overlayLines.map((line) => (
             <div
               key={line.key}
-              className="absolute left-0 right-0 -translate-y-1/2"
+              className={`absolute left-0 right-0 -translate-y-1/2 ${line.opacityClassName ?? ''}`}
               style={{ top: `${getPriceOffsetPercent(line.value)}%` }}
             >
               <div className={`w-full border-t ${line.dashed ? 'border-dashed' : 'border-dotted'} ${line.lineClassName}`} />
               {/* MT5-style axis label - small solid badge on right edge */}
               <div className="absolute right-0 top-0 -translate-y-1/2">
-                <div className={`px-1.5 py-[2px] text-[9px] font-bold tabular-nums rounded-l-sm ${line.badgeClassName}`}>
-                  {line.label} {formatPrice(line.value)}
+                <div className="flex items-center">
+                  <span className={`mr-1 hidden rounded px-1 py-[1px] text-[8px] font-bold uppercase tracking-wide sm:inline ${getOverlayStatusClasses(line.status).suffixClassName}`}>
+                    {line.status}
+                  </span>
+                  <div className={`px-1.5 py-[2px] text-[9px] font-bold tabular-nums rounded-l-sm ${line.badgeClassName}`}>
+                    {line.label} {formatPrice(line.value)}
+                  </div>
                 </div>
               </div>
             </div>
@@ -534,11 +694,20 @@ function TradingChart({
               </div>
             </div>
           </div>
+          {activeLevelLines.map((line) => renderTradeLevelLine(
+            line.key,
+            line.kind,
+            line.status,
+            line.label,
+            line.value,
+            formatPrice,
+            getPriceOffsetPercent
+          ))}
         </div>
       )}
       {/* MT5-style ghost trade overlay (closed trade from history) */}
       {overlayPriceRange && ghostTrade && isFinitePrice(ghostTrade.entryPrice) && isFinitePrice(ghostTrade.exitPrice) && (
-        <div style={{ ...chartAreaStyle, opacity: 0.5 }}>
+        <div style={chartAreaStyle}>
           {/* Shaded zone */}
           {(() => {
             const entryPct = getPriceOffsetPercent(ghostTrade.entryPrice);
@@ -556,23 +725,51 @@ function TradingChart({
             );
           })()}
           {/* Entry line */}
-          <div className="absolute left-0 right-0 -translate-y-1/2" style={{ top: `${getPriceOffsetPercent(ghostTrade.entryPrice)}%` }}>
-            <div className="w-full border-t border-dashed border-[#4fc3f7]/40" />
-            <div className="absolute right-0 top-0 -translate-y-1/2">
-              <div className="px-1.5 py-[1px] text-[9px] font-bold tabular-nums rounded-l-sm bg-[#4fc3f7]/60 text-[#0b0e14]">
-                Entry {formatPrice(ghostTrade.entryPrice)}
-              </div>
-            </div>
-          </div>
+          {renderTradeLevelLine(
+            'ghost-entry',
+            'entry',
+            'closed',
+            'Entry',
+            ghostTrade.entryPrice,
+            formatPrice,
+            getPriceOffsetPercent
+          )}
           {/* Exit line */}
-          <div className="absolute left-0 right-0 -translate-y-1/2" style={{ top: `${getPriceOffsetPercent(ghostTrade.exitPrice)}%` }}>
-            <div className="w-full border-t border-dashed border-orange-400/40" />
-            <div className="absolute right-0 top-0 -translate-y-1/2">
-              <div className="px-1.5 py-[1px] text-[9px] font-bold tabular-nums rounded-l-sm bg-orange-400/60 text-[#0b0e14]">
-                Exit {formatPrice(ghostTrade.exitPrice)} ({formatSignedPnl(ghostTrade.realizedPnl)})
-              </div>
-            </div>
-          </div>
+          {renderTradeLevelLine(
+            'ghost-exit',
+            'exit',
+            'closed',
+            `Exit (${formatSignedPnl(ghostTrade.realizedPnl)})`,
+            ghostTrade.exitPrice,
+            formatPrice,
+            getPriceOffsetPercent
+          )}
+          {isFinitePrice(ghostTrade.stopLoss) && renderTradeLevelLine(
+            'ghost-stop-loss',
+            'stop_loss',
+            'closed',
+            'SL',
+            ghostTrade.stopLoss,
+            formatPrice,
+            getPriceOffsetPercent
+          )}
+          {[
+            ghostTrade.takeProfit1,
+            ghostTrade.takeProfit2,
+            ghostTrade.takeProfit3,
+          ].map((price, index) => (
+            isFinitePrice(price)
+              ? renderTradeLevelLine(
+                `ghost-take-profit-${index + 1}`,
+                'take_profit',
+                'closed',
+                `TP${index + 1}`,
+                price,
+                formatPrice,
+                getPriceOffsetPercent
+              )
+              : null
+          ))}
         </div>
       )}
       {/* MT5-style bar countdown - compact bottom-left */}
