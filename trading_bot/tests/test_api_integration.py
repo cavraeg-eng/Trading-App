@@ -1,5 +1,6 @@
 """API integration tests for health, signals, broker, and persistence."""
 
+import asyncio
 import json
 import os
 import sys
@@ -11,7 +12,7 @@ import pytest
 # Ensure the project root is importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from trading_bot.persistence.db import init_db, get_conn
+from trading_bot.persistence.db import PersistenceError, get_conn, get_default_db_path, init_db
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +24,129 @@ def setup_test_db(tmp_path):
 
 
 class TestPersistence:
+    def test_fresh_database_initializes_required_state(self, tmp_path):
+        from trading_bot.persistence import repositories as repo
+
+        db_path = tmp_path / "nested" / "fresh.db"
+
+        init_db(db_path)
+        init_db(db_path)
+
+        assert db_path.exists()
+        assert repo.get_paper_account()["balance"] == 10000.0
+        assert repo.get_copy_settings()["enabled"] is False
+
+        tables = {
+            row["name"]
+            for row in get_conn()
+            .execute("SELECT name FROM sqlite_master WHERE type='table'")
+            .fetchall()
+        }
+        assert {"app_settings", "paper_account", "copy_settings", "trade_ledger_entries"} <= tables
+
+    def test_missing_database_file_is_recreated_with_defaults(self, tmp_path):
+        from trading_bot.persistence import repositories as repo
+
+        db_path = tmp_path / "restored.db"
+        init_db(db_path)
+        db_path.unlink()
+
+        account = repo.get_paper_account()
+
+        assert db_path.exists()
+        assert account["balance"] == 10000.0
+
+    def test_default_db_path_honors_environment(self, monkeypatch, tmp_path):
+        expected_path = tmp_path / "env" / "state.db"
+
+        monkeypatch.setenv("TRADING_BOT_DB_PATH", str(expected_path))
+
+        assert get_default_db_path() == expected_path
+
+    def test_repository_error_explains_unusable_database_path(self, tmp_path):
+        invalid_path = tmp_path / "db-dir"
+        invalid_path.mkdir()
+
+        with pytest.raises(PersistenceError, match="Could not open SQLite database"):
+            init_db(invalid_path)
+
+    def test_state_restoration_rehydrates_paper_account_and_active_broker(self, tmp_path):
+        from trading_bot.api.routes.paper_trading import _paper_account, restore_paper_trading_state
+        from trading_bot.execution.broker_base import BaseBroker
+        from trading_bot.execution.broker_manager import BrokerManager
+        from trading_bot.persistence import repositories as repo
+
+        class ConnectedBroker(BaseBroker):
+            def __init__(self):
+                super().__init__("connected", "Connected Broker", "test")
+
+            async def connect(self, credentials):
+                self.connected = True
+                return True
+
+            async def disconnect(self):
+                self.connected = False
+                return True
+
+            async def get_balance(self):
+                return None
+
+            async def place_order(self, *args, **kwargs):
+                raise NotImplementedError
+
+            async def cancel_order(self, order_id):
+                return False
+
+            async def get_order_status(self, order_id):
+                return None
+
+            async def get_positions(self):
+                return []
+
+            async def get_orders(self, count=50, symbol=None, status=None):
+                return []
+
+            async def close_position(self, symbol, position_id=None):
+                return False
+
+        init_db(tmp_path / "state_restoration.db")
+        repo.update_paper_balance(9500.0, 9600.0)
+        repo.insert_paper_order({
+            "trade_id": "restore001",
+            "symbol": "EUR/USD",
+            "side": "buy",
+            "quantity": 1.0,
+            "entry_price": 1.1,
+            "stop_loss": 1.0,
+            "take_profit_1": 1.2,
+            "take_profit_2": 1.3,
+            "take_profit_3": 1.4,
+            "status": "filled",
+            "pnl": 0.0,
+            "risk_percent": 2.0,
+            "trade_style": "swing",
+            "confidence": 80.0,
+            "opened_at": "2026-01-01T00:00:00",
+        })
+        repo.set_setting("broker:active", "connected")
+        _paper_account["balance"] = 10000.0
+        _paper_account["equity"] = 10000.0
+        _paper_account["positions"] = []
+        _paper_account["trades_history"] = []
+
+        broker = ConnectedBroker()
+        broker.connected = True
+        manager = BrokerManager(register_defaults=False)
+        manager.register_broker(broker)
+
+        restore_paper_trading_state()
+        asyncio.run(manager.restore_state())
+
+        assert _paper_account["balance"] == 9500.0
+        assert _paper_account["equity"] == 9600.0
+        assert _paper_account["positions"][0]["trade_id"] == "restore001"
+        assert manager.get_active_broker() is broker
+
     def test_paper_account_default(self):
         from trading_bot.persistence import repositories as repo
         acct = repo.get_paper_account()
