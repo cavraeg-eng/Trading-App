@@ -2,7 +2,6 @@
 
 import time
 from contextlib import asynccontextmanager
-import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -10,14 +9,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-from trading_bot.persistence.db import init_db
+from trading_bot.persistence.db import get_default_db_path, init_db
 from trading_bot.services.automation_worker import start_worker, stop_worker
 
 # Track start time for uptime calculation
 start_time = time.time()
 
 def get_api_db_path() -> Path:
-    return Path(os.getenv("TRADING_BOT_DB_PATH", "./data/trading_bot.db"))
+    return get_default_db_path()
 
 
 @asynccontextmanager
@@ -29,6 +28,9 @@ async def lifespan(app: FastAPI):
     init_db(db_path)
     print(f"SQLite database initialized at {db_path.resolve()}")
     from trading_bot.execution.broker_manager import broker_manager
+    from trading_bot.api.routes.paper_trading import restore_paper_trading_state
+
+    restore_paper_trading_state()
     await broker_manager.restore_state()
     start_worker()
     yield

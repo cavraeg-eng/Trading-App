@@ -7,6 +7,7 @@ import time
 import uuid
 
 from trading_bot.persistence import repositories as repo
+from trading_bot.persistence.db import PersistenceError
 
 router = APIRouter(prefix="/api/trading", tags=["paper_trading"])
 
@@ -21,6 +22,18 @@ _paper_account = {
 
 # Lock to serialize account state mutations
 _account_lock = asyncio.Lock()
+
+
+def restore_paper_trading_state() -> None:
+    persisted = repo.get_paper_account()
+    positions = repo.get_paper_positions()
+    history = repo.get_paper_history()
+    _paper_account["balance"] = persisted["balance"]
+    _paper_account["equity"] = persisted["equity"]
+    _paper_account["initial_balance"] = persisted["initial_balance"]
+    _paper_account["positions"] = positions
+    _paper_account["trades_history"] = history
+
 
 class PaperOrderRequest(BaseModel):
     symbol: str
@@ -104,8 +117,10 @@ async def place_paper_order(order: PaperOrderRequest):
                     "opened_at": str(time.time()),
                 }
             )
-        except Exception:
-            pass
+        except PersistenceError as exc:
+            _paper_account["positions"].remove(trade)
+            _paper_account["trades_history"].remove(trade)
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
     
         return {
             "success": True,
@@ -128,8 +143,8 @@ async def get_paper_positions():
         positions = repo.get_paper_positions()
         if positions:
             return {"positions": positions}
-    except Exception:
-        pass
+    except PersistenceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"positions": _paper_account["positions"]}
 
 @router.get("/paper-account")
@@ -138,7 +153,7 @@ async def get_paper_account():
     try:
         persisted = repo.get_paper_account()
         total_positions = len(repo.get_paper_positions())
-    except Exception:
+    except PersistenceError:
         persisted = None
         total_positions = len(_paper_account["positions"])
     return {
@@ -158,6 +173,6 @@ async def reset_paper_account():
     _paper_account["trades_history"] = []
     try:
         repo.reset_paper_account()
-    except Exception:
-        pass
+    except PersistenceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"success": True, "message": "Paper account reset to $10,000"}
