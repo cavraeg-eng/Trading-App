@@ -70,6 +70,7 @@ def test_trade_recommendations_require_actionable_levels(recommendation):
         "take_profit_targets": [PredictionTarget(label="TP1", price=1.11, reward_risk=2.0)],
         "invalidation_level": 1.095,
         "risk_reward": 2.0,
+        "expires_at": datetime.now(tz=timezone.utc),
     })
 
     response = PredictionResponse(**payload)
@@ -140,6 +141,7 @@ def test_contract_endpoint_documents_consumers():
     assert "scanner" in payload["compatibility"]
     assert "freshness" in payload["requiredForEveryResponse"]
     assert "entry" in payload["requiredForBuySell"]
+    assert "expires_at" in payload["requiredForBuySell"]
 
 
 def test_hold_prediction_tolerates_missing_trade_levels(monkeypatch):
@@ -231,6 +233,153 @@ def test_incomplete_buy_levels_downgrade_to_no_trade_without_targets(monkeypatch
     assert response.no_trade_reason == PredictionNoTradeReason.REWARD_RISK_COMPRESSED
     assert response.take_profit_targets == []
     assert response.chart.take_profit_targets == []
+    assert response.no_trade_reasons
+
+
+def test_buy_prediction_generates_valid_actionable_suggestion(monkeypatch):
+    monkeypatch.setattr(
+        predictions,
+        "analyze_symbol",
+        lambda symbol, timeframe, trade_style="swing": _analysis(
+            currentPrice=1.1000,
+            signal="buy",
+            confidence=76,
+            reason="bullish confirmation",
+            entryRange={"min": 1.0988, "max": 1.1000},
+            stopLoss=1.0960,
+            takeProfit1=1.1040,
+            takeProfit2=1.1080,
+            takeProfit3=1.1120,
+            riskReward=2.0,
+            atr=0.002,
+            anchorModel={"support": 1.097, "resistance": 1.11},
+        ),
+    )
+    monkeypatch.setattr(
+        predictions,
+        "get_ohlcv_with_metadata",
+        lambda symbol, timeframe, trade_style="swing": (None, _metadata(marketStatus="open")),
+    )
+
+    response = predictions.build_prediction_response(_request())
+
+    assert response.recommendation == PredictionRecommendation.BUY
+    assert response.entry is not None
+    assert response.stop_loss is not None
+    assert response.entry.max <= response.chart.current_price
+    assert response.stop_loss < response.entry.min
+    assert response.take_profit_targets[0].price > response.chart.current_price
+    assert response.risk_reward is not None and response.risk_reward >= 1.35
+    assert response.expires_at is not None
+    assert response.chart.expires_at == response.expires_at
+    assert response.chart.annotations
+
+
+def test_sell_prediction_generates_valid_actionable_suggestion(monkeypatch):
+    monkeypatch.setattr(
+        predictions,
+        "analyze_symbol",
+        lambda symbol, timeframe, trade_style="swing": _analysis(
+            currentPrice=1.1000,
+            signal="sell",
+            confidence=74,
+            reason="bearish confirmation",
+            entryRange={"min": 1.1000, "max": 1.1012},
+            stopLoss=1.1040,
+            takeProfit1=1.0960,
+            takeProfit2=1.0920,
+            takeProfit3=1.0880,
+            riskReward=2.0,
+            atr=0.002,
+            indicators=[
+                {"name": "RSI", "value": 62, "signal": "bearish"},
+                {"name": "MACD", "value": -0.001, "signal": "bearish"},
+                {"name": "EMA", "value": 1.102, "signal": "bearish"},
+            ],
+            higherTimeframeBias={"direction": "bearish", "strength": 0.8},
+            anchorModel={"support": 1.09, "resistance": 1.103},
+        ),
+    )
+    monkeypatch.setattr(
+        predictions,
+        "get_ohlcv_with_metadata",
+        lambda symbol, timeframe, trade_style="swing": (None, _metadata(marketStatus="open")),
+    )
+
+    response = predictions.build_prediction_response(_request())
+
+    assert response.recommendation == PredictionRecommendation.SELL
+    assert response.entry is not None
+    assert response.stop_loss is not None
+    assert response.entry.min >= response.chart.current_price
+    assert response.stop_loss > response.entry.max
+    assert response.take_profit_targets[0].price < response.chart.current_price
+    assert response.risk_reward is not None and response.risk_reward >= 1.35
+
+
+def test_invalid_directional_levels_downgrade_to_no_trade(monkeypatch):
+    monkeypatch.setattr(
+        predictions,
+        "analyze_symbol",
+        lambda symbol, timeframe, trade_style="swing": _analysis(
+            currentPrice=1.1000,
+            signal="buy",
+            confidence=82,
+            reason="bullish but invalid levels",
+            entryRange={"min": 1.1010, "max": 1.1020},
+            stopLoss=1.1030,
+            takeProfit1=1.0990,
+            takeProfit2=1.0980,
+            takeProfit3=1.0970,
+            riskReward=2.0,
+            atr=0.002,
+        ),
+    )
+    monkeypatch.setattr(
+        predictions,
+        "get_ohlcv_with_metadata",
+        lambda symbol, timeframe, trade_style="swing": (None, _metadata(marketStatus="open")),
+    )
+
+    response = predictions.build_prediction_response(_request())
+
+    assert response.recommendation == PredictionRecommendation.NO_TRADE
+    assert response.no_trade_reason == PredictionNoTradeReason.INSUFFICIENT_DATA
+    assert response.entry is None
+    assert response.take_profit_targets == []
+    assert len(response.warnings) >= 2
+
+
+def test_compressed_primary_target_reward_risk_downgrades_to_no_trade(monkeypatch):
+    monkeypatch.setattr(
+        predictions,
+        "analyze_symbol",
+        lambda symbol, timeframe, trade_style="swing": _analysis(
+            currentPrice=1.1000,
+            signal="buy",
+            confidence=82,
+            reason="bullish but first target runway is compressed",
+            entryRange={"min": 1.0988, "max": 1.1000},
+            stopLoss=1.0960,
+            takeProfit1=1.1010,
+            takeProfit2=1.1080,
+            takeProfit3=1.1120,
+            riskReward=2.0,
+            atr=0.002,
+        ),
+    )
+    monkeypatch.setattr(
+        predictions,
+        "get_ohlcv_with_metadata",
+        lambda symbol, timeframe, trade_style="swing": (None, _metadata(marketStatus="open")),
+    )
+
+    response = predictions.build_prediction_response(_request())
+
+    assert response.recommendation == PredictionRecommendation.NO_TRADE
+    assert response.no_trade_reason == PredictionNoTradeReason.REWARD_RISK_COMPRESSED
+    assert response.entry is None
+    assert response.stop_loss is None
     assert response.no_trade_reasons
 
 

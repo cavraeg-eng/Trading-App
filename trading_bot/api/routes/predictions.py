@@ -25,7 +25,6 @@ from trading_bot.api.models import (
     PredictionRiskConstraints,
     PredictionStrategyMode,
     PredictionSuggestionCard,
-    PredictionTarget,
     PredictionWarning,
     PredictionWarningCode,
     confidence_band_for_score,
@@ -35,6 +34,7 @@ from trading_bot.config import get_logger, get_settings
 from trading_bot.data.market_data_service import get_ohlcv_with_metadata
 from trading_bot.execution.broker_manager import BrokerOperationError, broker_manager
 from trading_bot.services.prediction_quality import NoTradeGate, evaluate_prediction_quality
+from trading_bot.services.trade_suggestions import generate_trade_suggestion
 
 logger = get_logger(__name__)
 
@@ -522,47 +522,6 @@ def _rationale(analysis: Optional[dict[str, Any]]) -> list[PredictionRationaleIt
     return items
 
 
-def _targets(analysis: dict[str, Any]) -> list[PredictionTarget]:
-    targets: list[PredictionTarget] = []
-    risk_reward = analysis.get("riskReward")
-    target_risk_reward = float(risk_reward) if risk_reward is not None else None
-    for index, key in enumerate(("takeProfit1", "takeProfit2", "takeProfit3"), start=1):
-        price = analysis.get(key)
-        if price is None:
-            continue
-        targets.append(PredictionTarget(
-            label=f"TP{index}",
-            price=float(price),
-            reward_risk=target_risk_reward,
-        ))
-    return targets
-
-
-def _trade_setup_levels(
-    analysis: dict[str, Any],
-) -> tuple[
-    Optional[PredictionPriceZone],
-    Optional[float],
-    list[PredictionTarget],
-    Optional[float],
-    Optional[float],
-]:
-    entry_range = analysis.get("entryRange") or {}
-    current_price = analysis.get("currentPrice", 0)
-    entry = PredictionPriceZone(
-        min=float(entry_range.get("min", current_price)),
-        max=float(entry_range.get("max", current_price)),
-        label="Entry zone",
-    )
-    stop_loss_raw = analysis.get("stopLoss")
-    risk_reward_raw = analysis.get("riskReward")
-    stop_loss = float(stop_loss_raw) if stop_loss_raw is not None else None
-    risk_reward = float(risk_reward_raw) if risk_reward_raw is not None else None
-    targets = _targets(analysis)
-    invalidation = stop_loss
-    return entry, stop_loss, targets, invalidation, risk_reward
-
-
 def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
     """Build a contract-compliant prediction response from current analysis."""
     if request.symbol not in ALLOWED_SYMBOLS and map_symbol_to_yf(request.symbol) not in ALLOWED_SYMBOLS:
@@ -580,50 +539,58 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
     recommendation = _recommendation_from_signal((analysis or {}).get("signal"))
     freshness = _freshness_metadata(metadata)
     warnings = _warnings_from_metadata(metadata) + _warnings_from_gates(quality.gates)
-    entry = None
-    targets: list[PredictionTarget] = []
-    stop_loss = None
-    invalidation = None
-    risk_reward = None
-    if analysis and recommendation in {PredictionRecommendation.BUY, PredictionRecommendation.SELL}:
-        entry, stop_loss, targets, invalidation, risk_reward = _trade_setup_levels(analysis)
-    incomplete_actionable_levels = (
-        (analysis or {}).get("signal") in {"buy", "sell"}
-        and (entry is None or stop_loss is None or not targets or risk_reward is None)
+    trade_suggestion = generate_trade_suggestion(
+        analysis,
+        recommendation,
+        request.timeframe,
+        PredictionNoTradeReason.INSUFFICIENT_DATA,
+        evaluated_at=started_at,
     )
-    no_trade_reason = None
+    recommendation = trade_suggestion.recommendation
+    warnings.extend(trade_suggestion.warnings)
+    no_trade_reason = trade_suggestion.no_trade_reason
     no_trade_reasons: list[PredictionNoTradeDetail] = []
+    if no_trade_reason is not None:
+        no_trade_reasons = [PredictionNoTradeDetail(
+            code=no_trade_reason,
+            message="Actionable trade setup validation rejected this suggestion.",
+            context={
+                "warnings": [warning.message for warning in trade_suggestion.warnings],
+            },
+        )]
+    rejected_actionable_levels = (
+        str((analysis or {}).get("signal") or "").lower() in {"buy", "sell"}
+        and trade_suggestion.recommendation == PredictionRecommendation.NO_TRADE
+    )
 
     if quality.gates:
         recommendation = PredictionRecommendation.NO_TRADE
         no_trade_reason = quality.gates[0].code
         no_trade_reasons = _no_trade_details(quality.gates)
-        entry = None
-        stop_loss = None
-        targets = []
-        invalidation = None
-        risk_reward = None
+        trade_suggestion.entry = None
+        trade_suggestion.stop_loss = None
+        trade_suggestion.targets = []
+        trade_suggestion.invalidation_level = None
+        trade_suggestion.risk_reward = None
+        trade_suggestion.expires_at = None
 
-    if incomplete_actionable_levels and not quality.gates:
-        recommendation = PredictionRecommendation.NO_TRADE
-        no_trade_reason = PredictionNoTradeReason.INSUFFICIENT_DATA
+    if rejected_actionable_levels and not quality.gates and not no_trade_reasons:
+        no_trade_reason = trade_suggestion.no_trade_reason or PredictionNoTradeReason.INSUFFICIENT_DATA
         no_trade_reasons = [PredictionNoTradeDetail(
-            code=PredictionNoTradeReason.INSUFFICIENT_DATA,
-            message="Actionable trade levels are incomplete for this suggestion.",
+            code=no_trade_reason,
+            message="Actionable trade setup validation rejected this suggestion.",
+            context={
+                "warnings": [warning.message for warning in trade_suggestion.warnings],
+            },
         )]
-        entry = None
-        stop_loss = None
-        targets = []
-        invalidation = None
-        risk_reward = None
 
     current_price = (analysis or {}).get("currentPrice")
     current_price_float = float(current_price) if current_price is not None else None
     position_size, position_size_reason, sizing_warnings = _position_size_guidance(
         request,
         recommendation,
-        entry,
-        stop_loss,
+        trade_suggestion.entry,
+        trade_suggestion.stop_loss,
         current_price_float,
     )
     account_risk_warnings = [
@@ -638,22 +605,25 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
             code=PredictionNoTradeReason.RISK_LIMITS,
             message="Account risk checks blocked this suggestion.",
         )]
-        entry = None
-        stop_loss = None
-        targets = []
-        invalidation = None
-        risk_reward = None
+        trade_suggestion.entry = None
+        trade_suggestion.stop_loss = None
+        trade_suggestion.targets = []
+        trade_suggestion.invalidation_level = None
+        trade_suggestion.risk_reward = None
+        trade_suggestion.expires_at = None
         position_size = None
         position_size_reason = "Position sizing withheld because account risk checks blocked this suggestion."
 
     chart = PredictionChartOverlay(
         current_price=current_price_float,
-        entry_zone=entry,
-        stop_loss=stop_loss,
-        take_profit_targets=targets,
-        invalidation_level=invalidation,
+        entry_zone=trade_suggestion.entry,
+        stop_loss=trade_suggestion.stop_loss,
+        take_profit_targets=trade_suggestion.targets,
+        invalidation_level=trade_suggestion.invalidation_level,
+        expires_at=trade_suggestion.expires_at,
         support=((analysis or {}).get("anchorModel") or {}).get("support"),
         resistance=((analysis or {}).get("anchorModel") or {}).get("resistance"),
+        annotations=trade_suggestion.annotations,
     )
     badge = recommendation.value.replace("_", " ").title()
     suggestion = PredictionSuggestionCard(
@@ -678,11 +648,12 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
         confidence_band=confidence_band_for_score(confidence),
         no_trade_reason=no_trade_reason,
         no_trade_reasons=no_trade_reasons,
-        entry=entry,
-        stop_loss=stop_loss,
-        take_profit_targets=targets,
-        invalidation_level=invalidation,
-        risk_reward=risk_reward,
+        entry=trade_suggestion.entry,
+        stop_loss=trade_suggestion.stop_loss,
+        take_profit_targets=trade_suggestion.targets,
+        invalidation_level=trade_suggestion.invalidation_level,
+        risk_reward=trade_suggestion.risk_reward,
+        expires_at=trade_suggestion.expires_at,
         rationale=_rationale(analysis),
         warnings=warnings,
         account_risk_warnings=account_risk_warnings,
@@ -760,7 +731,7 @@ async def get_prediction_contract() -> dict:
             "suggestion_card",
             "generated_at",
         ],
-        "requiredForBuySell": ["entry", "stop_loss", "take_profit_targets", "risk_reward", "invalidation_level"],
+        "requiredForBuySell": ["entry", "stop_loss", "take_profit_targets", "risk_reward", "invalidation_level", "expires_at"],
         "requiredForNoTrade": ["no_trade_reason", "no_trade_reasons"],
         "optionalAccountRiskFields": [
             "account_context_status",
