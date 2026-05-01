@@ -61,6 +61,10 @@ interface TradeHistoryItem {
   opened_at: string
   closed_at: string
   state: string
+  stop_loss?: number | null
+  take_profit_1?: number | null
+  take_profit_2?: number | null
+  take_profit_3?: number | null
 }
 
 interface BrokerBalance {
@@ -151,6 +155,33 @@ function formatMovementAmount(value: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits,
   })}`
+}
+
+function formatPercent(value: number | null) {
+  if (value == null || !Number.isFinite(value)) return '—'
+  return `${value.toFixed(value >= 10 ? 0 : 1)}%`
+}
+
+function formatCompactTime(value: string | null | undefined) {
+  if (!value) return 'Not synced'
+  const parsed = Date.parse(value)
+  if (!Number.isFinite(parsed)) return 'Not synced'
+  return new Date(parsed).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function normalizeTradingMode(environment: string | null | undefined) {
+  const normalized = (environment ?? '').toLowerCase()
+  if (normalized.includes('live') || normalized.includes('real')) return 'live'
+  return 'paper'
+}
+
+function getFeedTone(status: FeedStatus) {
+  switch (status) {
+    case 'ready': return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+    case 'loading': return 'border-blue-500/20 bg-blue-500/10 text-blue-300'
+    case 'error': return 'border-amber-500/20 bg-amber-500/10 text-amber-300'
+    default: return 'border-slate-500/20 bg-slate-500/10 text-slate-400'
+  }
 }
 
 function getPipMovement(pair: ForexPair, entry: number, current: number) {
@@ -248,6 +279,10 @@ function ledgerEntryToHistory(entry: TradeLedgerEntry): TradeHistoryItem {
     opened_at: entry.opened_at ?? entry.updated_at,
     closed_at: entry.closed_at ?? entry.updated_at,
     state: entry.status,
+    stop_loss: entry.stop_loss,
+    take_profit_1: entry.take_profit_1,
+    take_profit_2: entry.take_profit_2,
+    take_profit_3: entry.take_profit_3,
   }
 }
 
@@ -712,6 +747,8 @@ function LiveTrading({
     setCurrentPnL(total)
   }, [positions])
 
+  const automationMode = normalizeTradingMode(activeBroker?.environment ?? backendBroker?.environment ?? automationStatus?.mode)
+
   const handleToggleTrading = useCallback(async () => {
     if (isStartingTrading) return
 
@@ -729,11 +766,11 @@ function LiveTrading({
       setIsStartingTrading(true)
       try {
         // 1. Activate strategy in live mode
-        await api.activateStrategy(selectedStrategyId, 'live', true)
+        await api.activateStrategy(selectedStrategyId, automationMode, true)
         // 2. Start automation worker in live mode with broker
-        await api.startAutomationWorker({ mode: 'live', broker_id: activeBroker.id })
+        await api.startAutomationWorker({ mode: automationMode, broker_id: activeBroker.id })
         setIsTrading(true)
-        setOrderMessage({ type: 'success', message: `AI trading started with ${strategies.find(s => s.id === selectedStrategyId)?.name || selectedStrategyId}` })
+        setOrderMessage({ type: 'success', message: `${automationMode === 'live' ? 'Live' : 'Paper'} AI trading started with ${strategies.find(s => s.id === selectedStrategyId)?.name || selectedStrategyId}` })
       } catch (err: any) {
         setOrderMessage({ type: 'error', message: err?.detail || 'Failed to start trading' })
       } finally {
@@ -752,7 +789,7 @@ function LiveTrading({
         setIsStartingTrading(false)
       }
     }
-  }, [isTrading, isStartingTrading, activeBroker, selectedStrategyId, strategies])
+  }, [isTrading, isStartingTrading, activeBroker, selectedStrategyId, strategies, automationMode])
 
   // Handle position row click - select for chart sync
   const handlePositionClick = useCallback((pos: Position) => {
@@ -798,6 +835,10 @@ function LiveTrading({
         side: trade.side as 'buy' | 'sell',
         realizedPnl: trade.realized_pnl,
         symbol: trade.symbol,
+        stopLoss: trade.stop_loss != null && trade.stop_loss > 0 ? trade.stop_loss : undefined,
+        takeProfit1: trade.take_profit_1 != null && trade.take_profit_1 > 0 ? trade.take_profit_1 : undefined,
+        takeProfit2: trade.take_profit_2 != null && trade.take_profit_2 > 0 ? trade.take_profit_2 : undefined,
+        takeProfit3: trade.take_profit_3 != null && trade.take_profit_3 > 0 ? trade.take_profit_3 : undefined,
       })
       setSelectedPositionId(null)
       setSelectedOrderId(null)
@@ -926,6 +967,20 @@ function LiveTrading({
   const lastAnalysis = automationStatus?.lastAnalysis
   const workerRunning = automationStatus?.worker?.running ?? false
   const recentExecs = automationStatus?.executions ?? []
+  const selectedStrategy = strategies.find((strategy) => strategy.id === selectedStrategyId) ?? automationStatus?.activeStrategy ?? null
+  const isLiveMode = automationMode === 'live'
+  const brokerReady = Boolean(activeBroker?.connected)
+  const brokerConfigured = Boolean(activeBroker?.id || backendBroker?.id)
+  const accountEquity = balance.total_equity ?? null
+  const usedMargin = balance.used_margin ?? 0
+  const marginUsage = accountEquity && accountEquity > 0 ? Math.min((usedMargin / accountEquity) * 100, 999) : null
+  const openRiskLabel = positions.length === 0 ? 'Flat' : `${positions.length} open`
+  const readinessItems = [
+    { label: 'Broker', value: brokerReady ? 'Connected' : brokerConfigured ? 'Disconnected' : 'Not configured', status: feedState.broker.status },
+    { label: 'Account', value: accountEquity != null ? `${balance.currency ?? 'USD'} ${formatAccountAmount(accountEquity)}` : 'No balance', status: feedState.balance.status },
+    { label: 'Automation', value: workerRunning ? 'Running' : 'Stopped', status: feedState.automation.status },
+    { label: 'Signal', value: lastAnalysis ? `${lastAnalysis.signal.toUpperCase()} ${formatPercent(lastAnalysis.confidence)}` : chartSignals.length ? 'Chart setup' : 'No setup', status: feedState.signal.status },
+  ]
 
   // Build active position overlay for chart
   const activePositionOverlay = useMemo<ActivePositionOverlay | null>(() => {
@@ -940,6 +995,7 @@ function LiveTrading({
       unrealizedPnl: pos.unrealized_pnl,
       quantity: pos.quantity,
       positionId: pos.position_id ?? undefined,
+      status: 'active',
       stopLoss: matchingOrder?.stop_loss != null && matchingOrder.stop_loss > 0 ? matchingOrder.stop_loss : undefined,
       takeProfit1: matchingOrder?.take_profit_1 != null && matchingOrder.take_profit_1 > 0 ? matchingOrder.take_profit_1 : undefined,
       takeProfit2: matchingOrder?.take_profit_2 != null && matchingOrder.take_profit_2 > 0 ? matchingOrder.take_profit_2 : undefined,
@@ -953,12 +1009,14 @@ function LiveTrading({
     const order = orders.find(o => o.order_id === selectedOrderId)
     if (!order) return null
     const price = order.avg_fill_price || order.price || 0
+    const orderStatus = order.status.toLowerCase()
     return {
       entryPrice: price,
       currentPrice: price,
       side: order.side === 'buy' ? 'long' : 'short',
       unrealizedPnl: 0,
       quantity: order.quantity,
+      status: ['filled', 'partially_filled'].includes(orderStatus) ? 'active' : 'pending',
       stopLoss: order.stop_loss != null && order.stop_loss > 0 ? order.stop_loss : undefined,
       takeProfit1: order.take_profit_1 != null && order.take_profit_1 > 0 ? order.take_profit_1 : undefined,
       takeProfit2: order.take_profit_2 != null && order.take_profit_2 > 0 ? order.take_profit_2 : undefined,
@@ -1028,6 +1086,9 @@ function LiveTrading({
 
       const hasAnyLevel = entry > 0 || stopLoss > 0 || takeProfit1 > 0
       if (hasAnyLevel) {
+        const setupStatus = hasOpenPosition || ['filled', 'partially_filled', 'open'].includes(activeOrder?.status.toLowerCase() ?? activeLedgerEntry?.status.toLowerCase() ?? '')
+          ? 'active' as const
+          : 'pending' as const
         return {
           source: 'active' as const,
           signals: [{
@@ -1042,6 +1103,7 @@ function LiveTrading({
             direction,
             timestamp: activeOrder?.updated_at || activeOrder?.created_at || activeLedgerEntry?.updated_at || new Date().toISOString(),
             status: 'VALID' as const,
+            setupStatus,
             confidence: 100,
             symbol: selectedPair.symbol,
             expiresAt: undefined,
@@ -1149,20 +1211,24 @@ function LiveTrading({
           {/* Start/Stop trading */}
           <button
             onClick={handleToggleTrading}
-            disabled={isStartingTrading || (!isTrading && !activeBroker?.connected)}
+            disabled={isStartingTrading || (!isTrading && (!brokerReady || !selectedStrategyId))}
+            title={!brokerReady ? 'Connect a broker before starting automation' : !selectedStrategyId ? 'Select a strategy before starting automation' : undefined}
             className={`flex items-center gap-1 px-3 py-1.5 rounded text-[11px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
               isTrading
                 ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                : isLiveMode
+                  ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                  : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
             }`}
           >
             <Power size={12} />
-            {isStartingTrading ? '...' : isTrading ? 'Stop' : 'Start'}
+            {isStartingTrading ? '...' : isTrading ? 'Stop' : `Start ${isLiveMode ? 'Live' : 'Paper'}`}
           </button>
           {/* New Order button */}
           <button
             onClick={() => handlePlaceOrderClick('buy')}
-            disabled={isPlacingOrder || !activeBroker?.connected}
+            disabled={isPlacingOrder || !brokerReady}
+            title={!brokerReady ? 'Manual orders require a connected broker' : undefined}
             className="flex items-center gap-1 px-3 py-1.5 rounded bg-trading-accent/20 text-trading-accent text-[11px] font-semibold hover:bg-trading-accent/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Plus size={12} />
@@ -1185,6 +1251,86 @@ function LiveTrading({
           <button onClick={() => setOrderMessage(null)} className="ml-auto hover:opacity-70"><X size={12} /></button>
         </div>
       )}
+
+      {/* Live workspace readiness cockpit */}
+      <section className="border-b border-[#1c2333] bg-[#090d14] px-3 py-3 shrink-0">
+        <div className="grid gap-3 xl:grid-cols-[1.25fr_1fr_1fr]">
+          <div className={`rounded-xl border p-3 ${brokerReady ? 'border-emerald-500/25 bg-emerald-500/[0.04]' : 'border-amber-500/25 bg-amber-500/[0.04]'}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-trading-muted">Broker readiness</p>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <span className={`h-2 w-2 rounded-full ${brokerReady ? 'bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.85)]' : 'bg-amber-400'}`} />
+                  <h2 className="text-sm font-bold text-trading-text">
+                    {brokerReady ? `${activeBroker?.name ?? 'Broker'} connected` : brokerConfigured ? 'Broker disconnected' : 'Broker not configured'}
+                  </h2>
+                </div>
+                <p className="mt-1 text-[11px] leading-5 text-trading-muted">
+                  {brokerReady
+                    ? `${isLiveMode ? 'Live account actions are enabled. Verify size and risk before execution.' : 'Paper trading is active by default; live capital is not implied.'}`
+                    : 'Monitoring stays available, but automation and manual execution are gated until a broker is connected.'}
+                </p>
+              </div>
+              <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${isLiveMode ? 'bg-amber-500/15 text-amber-300' : 'bg-emerald-500/15 text-emerald-300'}`}>
+                {isLiveMode ? 'Live mode' : 'Paper safe'}
+              </span>
+            </div>
+            {!brokerReady && (
+              <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-[11px] text-amber-200">
+                Open Settings to configure or reconnect a broker. No credential details are shown here.
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-[#1c2333] bg-[#0d1117] p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-trading-muted">Account risk</p>
+            <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+              <div>
+                <p className="text-trading-muted">Equity</p>
+                <p className="mt-0.5 text-sm font-bold text-trading-text tabular-nums">{accountEquity != null ? `${balance.currency ?? 'USD'} ${formatAccountAmount(accountEquity)}` : '—'}</p>
+              </div>
+              <div>
+                <p className="text-trading-muted">Open risk</p>
+                <p className={`mt-0.5 text-sm font-bold tabular-nums ${positions.length ? 'text-amber-300' : 'text-emerald-300'}`}>{openRiskLabel}</p>
+              </div>
+              <div>
+                <p className="text-trading-muted">Margin used</p>
+                <p className="mt-0.5 font-semibold text-trading-text tabular-nums">{marginUsage != null ? formatPercent(marginUsage) : '—'}</p>
+              </div>
+              <div>
+                <p className="text-trading-muted">Open P&L</p>
+                <p className={`mt-0.5 font-semibold tabular-nums ${currentPnL >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{formatSignedCurrency(currentPnL)}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[#1c2333] bg-[#0d1117] p-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-trading-muted">Automation guardrails</p>
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${workerRunning ? 'bg-blue-500/15 text-blue-300' : 'bg-slate-500/15 text-slate-400'}`}>
+                {workerRunning ? 'Running' : 'Paused'}
+              </span>
+            </div>
+            <div className="mt-2 space-y-1.5 text-[11px]">
+              <div className="flex justify-between gap-3"><span className="text-trading-muted">Strategy</span><span className="truncate font-semibold text-trading-text">{selectedStrategy?.name ?? 'Select strategy'}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-trading-muted">Mode</span><span className={isLiveMode ? 'font-semibold text-amber-300' : 'font-semibold text-emerald-300'}>{isLiveMode ? 'Live account' : 'Paper execution'}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-trading-muted">Last run</span><span className="font-semibold text-trading-text tabular-nums">{formatCompactTime(automationStatus?.worker?.lastRun ? new Date(automationStatus.worker.lastRun * 1000).toISOString() : null)}</span></div>
+            </div>
+            {automationStatus?.worker?.lastError && (
+              <p className="mt-2 rounded border border-red-500/20 bg-red-500/8 px-2 py-1 text-[10px] text-red-300">{automationStatus.worker.lastError}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+          {readinessItems.map((item) => (
+            <div key={item.label} className={`rounded-lg border px-3 py-2 ${getFeedTone(item.status)}`}>
+              <div className="text-[10px] uppercase tracking-wide opacity-70">{item.label}</div>
+              <div className="mt-0.5 truncate text-[12px] font-bold">{item.value}</div>
+            </div>
+          ))}
+        </div>
+      </section>
 
       {/* AI Activity Collapsible Panel */}
       {showAIPanel && (
@@ -1415,10 +1561,8 @@ function LiveTrading({
               <div className="px-3 py-6 text-center text-[11px] text-amber-300">{feedState.positions.error}</div>
             ) : positions.length === 0 ? (
               <div className="px-3 py-8 text-center">
-                <p className="text-[11px] text-trading-muted">No open positions</p>
-                {!activeBroker?.connected && (
-                  <p className="text-[10px] text-trading-muted/60 mt-1">Connect a broker in Settings to start trading</p>
-                )}
+                <p className="text-[12px] font-semibold text-trading-text">No open positions</p>
+                <p className="mt-1 text-[11px] text-trading-muted">{brokerReady ? 'You are flat. New positions will appear here after execution.' : 'Connect a broker in Settings to monitor open exposure.'}</p>
               </div>
             ) : (
               positions.map((pos) => {
@@ -1527,7 +1671,7 @@ function LiveTrading({
             {feedState.orders.status === 'error' ? (
               <div className="px-3 py-6 text-center text-[11px] text-amber-300">{feedState.orders.error}</div>
             ) : orders.length === 0 ? (
-              <div className="px-3 py-8 text-center text-[11px] text-trading-muted">No recent orders</div>
+              <div className="px-3 py-8 text-center"><p className="text-[12px] font-semibold text-trading-text">No recent orders</p><p className="mt-1 text-[11px] text-trading-muted">Broker and AI executions will stream here when available.</p></div>
             ) : (
               orders.map((order) => {
                 const orderPair = getPairBySymbol(order.symbol) || selectedPair
@@ -1697,7 +1841,7 @@ function LiveTrading({
                 <div className="px-3 py-6 text-center text-[11px] text-amber-300">{feedState.history.error}</div>
               ) : filteredHistory.length === 0 ? (
                 <div className="px-3 py-8 text-center text-[11px] text-trading-muted">
-                  {tradeHistory.length === 0 ? 'No closed trades yet' : 'No trades match the selected filters'}
+                  {tradeHistory.length === 0 ? 'No closed trades yet. Completed trades will build your performance history.' : 'No trades match the selected filters'}
                 </div>
               ) : (
                 filteredHistory.map((trade) => {
@@ -1751,26 +1895,32 @@ function LiveTrading({
       </div>
 
       {/* MT5-style Quick Buy/Sell Buttons - Fixed Bottom */}
-      {activeBroker?.connected && (
-        <div className="flex items-stretch border-t border-[#1c2333] bg-[#0d1117] shrink-0">
-          <button
-            onClick={() => handlePlaceOrderClick('sell')}
-            disabled={isPlacingOrder}
-            className="flex-1 py-2.5 text-[12px] font-bold text-red-400 bg-red-500/8 hover:bg-red-500/15 transition-colors disabled:opacity-40 border-r border-[#1c2333]"
-          >
-            Sell
-            {latestQuote && <span className="ml-1.5 tabular-nums text-[11px] font-normal opacity-70">{formatPairPrice(latestQuote.currentPrice, selectedPair)}</span>}
-          </button>
-          <button
-            onClick={() => handlePlaceOrderClick('buy')}
-            disabled={isPlacingOrder}
-            className="flex-1 py-2.5 text-[12px] font-bold text-blue-400 bg-blue-500/8 hover:bg-blue-500/15 transition-colors disabled:opacity-40"
-          >
-            Buy
-            {latestQuote && <span className="ml-1.5 tabular-nums text-[11px] font-normal opacity-70">{formatPairPrice(latestQuote.currentPrice, selectedPair)}</span>}
-          </button>
-        </div>
-      )}
+      <div className="flex items-stretch border-t border-[#1c2333] bg-[#0d1117] shrink-0">
+        {brokerReady ? (
+          <>
+            <button
+              onClick={() => handlePlaceOrderClick('sell')}
+              disabled={isPlacingOrder}
+              className="flex-1 py-2.5 text-[12px] font-bold text-red-400 bg-red-500/8 hover:bg-red-500/15 transition-colors disabled:opacity-40 border-r border-[#1c2333]"
+            >
+              Sell
+              {latestQuote && <span className="ml-1.5 tabular-nums text-[11px] font-normal opacity-70">{formatPairPrice(latestQuote.currentPrice, selectedPair)}</span>}
+            </button>
+            <button
+              onClick={() => handlePlaceOrderClick('buy')}
+              disabled={isPlacingOrder}
+              className="flex-1 py-2.5 text-[12px] font-bold text-blue-400 bg-blue-500/8 hover:bg-blue-500/15 transition-colors disabled:opacity-40"
+            >
+              Buy
+              {latestQuote && <span className="ml-1.5 tabular-nums text-[11px] font-normal opacity-70">{formatPairPrice(latestQuote.currentPrice, selectedPair)}</span>}
+            </button>
+          </>
+        ) : (
+          <div className="flex-1 px-3 py-2.5 text-center text-[11px] text-trading-muted">
+            Execution controls locked until a broker is connected. Chart monitoring remains available.
+          </div>
+        )}
+      </div>
 
       {/* Order Confirmation Modal - MT5 style */}
       {orderConfirmation.show && (

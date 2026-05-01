@@ -15,6 +15,7 @@ from trading_bot.api.models import (
     PredictionFreshnessMetadata,
     PredictionLatencyMetadata,
     PredictionNoTradeReason,
+    PredictionPositionSize,
     PredictionPriceZone,
     PredictionRationaleItem,
     PredictionRecommendation,
@@ -24,7 +25,6 @@ from trading_bot.api.models import (
     PredictionStrategyMode,
     PredictionSuggestionCard,
     PredictionTarget,
-    PredictionPositionSize,
     PredictionWarning,
     PredictionWarningCode,
     confidence_band_for_score,
@@ -72,7 +72,6 @@ async def _account_context_from_broker(broker_id: Optional[str], symbol: str) ->
 
     settings = get_settings()
     balance = None
-    positions = []
     try:
         balance = await broker_manager.get_balance(selected_broker_id)
     except BrokerOperationError as exc:
@@ -83,6 +82,7 @@ async def _account_context_from_broker(broker_id: Optional[str], symbol: str) ->
         logger.warning(f"Prediction account position context unavailable: {exc.category}")
         broker_positions = []
 
+    positions = []
     for position in broker_positions:
         current_price = float(position.current_price or 0.0)
         quantity = float(position.quantity or 0.0)
@@ -141,6 +141,12 @@ def _recommendation_from_signal(signal: object, confidence: float) -> Prediction
     if confidence < 45:
         return PredictionRecommendation.NO_TRADE
     return PredictionRecommendation.HOLD
+
+
+def _trade_style_for_strategy_mode(strategy_mode: PredictionStrategyMode) -> str:
+    if strategy_mode == PredictionStrategyMode.SCALP:
+        return "scalp"
+    return "swing"
 
 
 def _no_trade_reason(analysis: Optional[dict[str, Any]], metadata: dict[str, Any]) -> PredictionNoTradeReason:
@@ -232,9 +238,7 @@ def _context_status(request: PredictionRequest, now: datetime) -> PredictionAcco
 
 
 def _constraint_amount(limit: Optional[float], equity: Optional[float]) -> Optional[float]:
-    if limit is None:
-        return None
-    if limit <= 0:
+    if limit is None or limit <= 0:
         return None
     if equity and 0 < limit <= 1:
         return equity * limit
@@ -386,7 +390,6 @@ def _account_risk_warnings(
     constraints = context.risk_constraints
     equity = context.equity if context.equity is not None else context.balance
     actionable = recommendation in {PredictionRecommendation.BUY, PredictionRecommendation.SELL}
-
     trading_mode = str(
         (constraints.trading_mode if constraints else None) or context.account_mode or ""
     ).lower()
@@ -547,7 +550,7 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
 
     started_at = datetime.now(tz=timezone.utc)
     account_context_status = _context_status(request, started_at)
-    trade_style = "scalp" if request.strategy_mode == PredictionStrategyMode.SCALP else "swing"
+    trade_style = _trade_style_for_strategy_mode(request.strategy_mode)
     analysis = analyze_symbol(request.symbol, request.timeframe, trade_style=trade_style)
     _, metadata = get_ohlcv_with_metadata(request.symbol, request.timeframe, trade_style=trade_style)
     elapsed_ms = (datetime.now(tz=timezone.utc) - started_at).total_seconds() * 1000
@@ -565,7 +568,7 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
 
     if recommendation == PredictionRecommendation.NO_TRADE:
         no_trade_reason = _no_trade_reason(analysis, metadata)
-    elif analysis:
+    elif analysis and recommendation in {PredictionRecommendation.BUY, PredictionRecommendation.SELL}:
         entry, stop_loss, targets, invalidation, risk_reward = _trade_setup_levels(analysis)
 
     if (
@@ -576,6 +579,7 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
         no_trade_reason = PredictionNoTradeReason.INSUFFICIENT_DATA
         entry = None
         stop_loss = None
+        targets = []
         invalidation = None
         risk_reward = None
 
@@ -722,6 +726,13 @@ async def get_prediction_contract() -> dict:
             "position_size_reason",
             "trade_allowed",
         ],
+        "strategyModeTradeStyleMap": {
+            "scalp": "scalp",
+            "swing": "swing",
+            "intraday": "swing",
+            "position": "swing",
+            "automation": "swing",
+        },
     }
 
 
