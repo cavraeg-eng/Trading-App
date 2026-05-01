@@ -64,14 +64,25 @@ class PredictionNoTradeReason(str, Enum):
     """Machine-readable reasons for a valid no-trade prediction."""
     INSUFFICIENT_DATA = "insufficient_data"
     STALE_DATA = "stale_data"
+    EXCESSIVE_SPREAD = "excessive_spread"
     LOW_CONFIDENCE = "low_confidence"
     MARKET_CLOSED = "market_closed"
     RISK_LIMITS = "risk_limits"
     CONFLICTING_SIGNALS = "conflicting_signals"
+    HIGH_VOLATILITY_SPIKE = "high_volatility_spike"
+    MISSING_FEATURES = "missing_features"
     UNSUPPORTED_ASSET = "unsupported_asset"
     MODEL_UNAVAILABLE = "model_unavailable"
     REWARD_RISK_COMPRESSED = "reward_risk_compressed"
     AUTOMATION_DISABLED = "automation_disabled"
+
+
+class PredictionAccountContextStatus(str, Enum):
+    """Availability state for account-aware prediction context."""
+    AVAILABLE = "available"
+    PARTIAL = "partial"
+    MISSING = "missing"
+    STALE = "stale"
 
 
 class PredictionWarningCode(str, Enum):
@@ -84,6 +95,49 @@ class PredictionWarningCode(str, Enum):
     NEAR_MAJOR_EVENT = "near_major_event"
     BROKER_LIMITATION = "broker_limitation"
     MODEL_DEGRADED = "model_degraded"
+    UNSUPPORTED_ASSET = "unsupported_asset"
+    ACCOUNT_CONTEXT_MISSING = "account_context_missing"
+    ACCOUNT_CONTEXT_PARTIAL = "account_context_partial"
+    ACCOUNT_CONTEXT_STALE = "account_context_stale"
+    POSITION_SIZING_UNAVAILABLE = "position_sizing_unavailable"
+    DAILY_LOSS_LIMIT = "daily_loss_limit"
+    MARGIN_PRESSURE = "margin_pressure"
+    EXPOSURE_LIMIT = "exposure_limit"
+    OPEN_POSITION_CONFLICT = "open_position_conflict"
+    TRADING_MODE_BLOCKED = "trading_mode_blocked"
+    RISK_LIMITS = "risk_limits"
+
+
+class PredictionPositionContext(BaseModel):
+    """Sanitized open-position summary for account-aware predictions."""
+    symbol: str
+    side: Optional[str] = None
+    quantity: Optional[float] = None
+    average_price: Optional[float] = None
+    current_price: Optional[float] = None
+    unrealized_pnl: Optional[float] = None
+    notional_exposure: Optional[float] = None
+
+
+class PredictionRiskConstraints(BaseModel):
+    """Optional advisory risk constraints supplied to prediction requests."""
+    risk_percent: Optional[float] = None
+    daily_loss_limit: Optional[float] = None
+    daily_pnl: Optional[float] = None
+    max_position_size: Optional[float] = None
+    max_position_notional: Optional[float] = None
+    max_open_positions: Optional[int] = None
+    max_symbol_exposure: Optional[float] = None
+    max_total_exposure: Optional[float] = None
+    trading_mode: Optional[str] = None
+
+
+class PredictionNoTradeDetail(BaseModel):
+    """Detailed no-trade gate result for UI and automation consumers."""
+    code: PredictionNoTradeReason
+    message: str
+    blocking: bool = True
+    context: Dict[str, Any] = {}
 
 
 class PredictionRationaleStance(str, Enum):
@@ -118,13 +172,20 @@ class PredictionRationaleCategory(str, Enum):
 class PredictionBrokerContext(BaseModel):
     """Optional broker/account context for risk-aware prediction requests."""
     broker_id: Optional[str] = None
-    account_id: Optional[str] = None
+    account_id: Optional[str] = Field(default=None, exclude=True)
     account_mode: Optional[str] = None
     base_currency: Optional[str] = None
+    balance: Optional[float] = None
     equity: Optional[float] = None
     available_margin: Optional[float] = None
+    used_margin: Optional[float] = None
+    margin_level: Optional[float] = None
     open_positions: int = 0
+    positions: List[PredictionPositionContext] = []
     max_risk_percent: Optional[float] = None
+    risk_constraints: Optional[PredictionRiskConstraints] = None
+    context_timestamp: Optional[datetime] = None
+    max_context_age_seconds: Optional[float] = 300.0
 
 
 class PredictionSourceContext(BaseModel):
@@ -232,6 +293,7 @@ class PredictionChartOverlay(BaseModel):
     stop_loss: Optional[float] = None
     take_profit_targets: List[PredictionTarget] = []
     invalidation_level: Optional[float] = None
+    expires_at: Optional[datetime] = None
     support: Optional[float] = None
     resistance: Optional[float] = None
     annotations: List[Dict[str, Any]] = []
@@ -246,6 +308,16 @@ class PredictionSuggestionCard(BaseModel):
     primary_metric_label: Optional[str] = None
     primary_metric_value: Optional[str] = None
     action_label: Optional[str] = None
+
+
+class PredictionPositionSize(BaseModel):
+    """Advisory position sizing output for a prediction response."""
+    quantity: float
+    unit: str = "units"
+    risk_amount: float
+    risk_percent: float
+    stop_distance: float
+    notional: Optional[float] = None
 
 
 class PredictionResponse(BaseModel):
@@ -266,13 +338,20 @@ class PredictionResponse(BaseModel):
     confidence: float = Field(ge=0, le=100)
     confidence_band: PredictionConfidenceBand
     no_trade_reason: Optional[PredictionNoTradeReason] = None
+    no_trade_reasons: List[PredictionNoTradeDetail] = []
     entry: Optional[PredictionPriceZone] = None
     stop_loss: Optional[float] = None
     take_profit_targets: List[PredictionTarget] = []
     invalidation_level: Optional[float] = None
     risk_reward: Optional[float] = None
+    expires_at: Optional[datetime] = None
     rationale: PredictionRationale
     warnings: List[PredictionWarning] = []
+    account_risk_warnings: List[PredictionWarning] = []
+    account_context_status: PredictionAccountContextStatus = PredictionAccountContextStatus.MISSING
+    position_size: Optional[PredictionPositionSize] = None
+    position_size_reason: Optional[str] = None
+    trade_allowed: bool = True
     freshness: PredictionFreshnessMetadata = Field(default_factory=PredictionFreshnessMetadata)
     latency: PredictionLatencyMetadata = Field(default_factory=PredictionLatencyMetadata)
     chart: PredictionChartOverlay
@@ -319,6 +398,8 @@ class PredictionResponse(BaseModel):
         if self.recommendation == PredictionRecommendation.NO_TRADE:
             if self.no_trade_reason is None:
                 raise ValueError("no_trade responses require no_trade_reason")
+            if not self.no_trade_reasons:
+                raise ValueError("no_trade responses require at least one no_trade_reasons item")
             if self.entry is not None or self.stop_loss is not None or self.take_profit_targets:
                 raise ValueError("no_trade responses must not include actionable trade levels")
             if not self.rationale.blockers:
@@ -346,11 +427,18 @@ class PredictionResponse(BaseModel):
                     self.rationale.next_conditions = ["Wait for the blocking condition to clear before acting."]
                 else:
                     raise ValueError("no_trade responses require rationale next_conditions")
+        elif self.recommendation == PredictionRecommendation.HOLD:
+            if self.entry is not None or self.stop_loss is not None or self.take_profit_targets:
+                raise ValueError("hold responses must not include actionable trade levels")
         elif self.recommendation in {PredictionRecommendation.BUY, PredictionRecommendation.SELL}:
             if self.entry is None or self.stop_loss is None or not self.take_profit_targets:
                 raise ValueError("buy/sell responses require entry, stop_loss, and take_profit_targets")
             if self.risk_reward is None:
                 raise ValueError("buy/sell responses require risk_reward")
+            if self.invalidation_level is None:
+                raise ValueError("buy/sell responses require invalidation_level")
+            if self.expires_at is None:
+                raise ValueError("buy/sell responses require expires_at")
             if not self.rationale.primary_reasons:
                 raise ValueError("buy/sell responses require rationale primary_reasons")
         return self
