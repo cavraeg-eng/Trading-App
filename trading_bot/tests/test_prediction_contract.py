@@ -270,3 +270,32 @@ def test_prediction_warmup_is_best_effort(monkeypatch):
     assert len(result["warmed"]) == 1
     assert len(result["failed"]) == 1
     assert result["failed"][0]["symbol"] == "BAD/USD"
+
+
+def test_prediction_warmup_rejects_too_many_combinations():
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/predictions/warmup",
+        json={
+            "symbols": [f"EUR/{index}" for index in range(11)],
+            "timeframes": ["1m", "5m", "15m", "1h", "4h"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "limited" in response.json()["detail"]
+
+
+def test_prediction_warmup_rejects_too_many_symbols():
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/predictions/warmup",
+        json={
+            "symbols": [f"EUR/{index}" for index in range(26)],
+            "timeframes": ["1h"],
+        },
+    )
+
+    assert response.status_code == 422

@@ -9,6 +9,7 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field as PydanticField
 
 from trading_bot.api.models import (
@@ -41,6 +42,9 @@ router = APIRouter(prefix="/api/predictions", tags=["predictions"])
 PREDICTION_FEATURE_VERSION = "prediction_features_v1"
 PREDICTION_CACHE_MAX_ENTRIES = 128
 PREDICTION_CACHE_TTL_SECONDS = 60.0
+PREDICTION_WARMUP_MAX_SYMBOLS = 25
+PREDICTION_WARMUP_MAX_TIMEFRAMES = 6
+PREDICTION_WARMUP_MAX_COMBINATIONS = 50
 
 _prediction_cache: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
 _prediction_cache_lock = threading.RLock()
@@ -48,8 +52,12 @@ _UNSET = object()
 
 
 class PredictionWarmupRequest(BaseModel):
-    symbols: list[str]
-    timeframes: list[str] = PydanticField(default_factory=lambda: ["1h"])
+    symbols: list[str] = PydanticField(min_length=1, max_length=PREDICTION_WARMUP_MAX_SYMBOLS)
+    timeframes: list[str] = PydanticField(
+        default_factory=lambda: ["1h"],
+        min_length=1,
+        max_length=PREDICTION_WARMUP_MAX_TIMEFRAMES,
+    )
     strategy_mode: PredictionStrategyMode = PredictionStrategyMode.SWING
 
 
@@ -487,6 +495,13 @@ async def get_prediction_cache() -> dict[str, Any]:
 
 @router.post("/warmup")
 async def warm_prediction_cache(request: PredictionWarmupRequest) -> dict[str, Any]:
+    total_requests = len(request.symbols) * len(request.timeframes)
+    if total_requests > PREDICTION_WARMUP_MAX_COMBINATIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Warmup is limited to {PREDICTION_WARMUP_MAX_COMBINATIONS} symbol/timeframe combinations.",
+        )
+
     warmed: list[dict[str, str]] = []
     failed: list[dict[str, str]] = []
     for symbol in request.symbols:
@@ -498,7 +513,7 @@ async def warm_prediction_cache(request: PredictionWarmupRequest) -> dict[str, A
                 strategy_mode=request.strategy_mode,
             )
             try:
-                response = build_prediction_response(prediction_request)
+                response = await run_in_threadpool(build_prediction_response, prediction_request)
                 warmed.append({
                     "symbol": symbol,
                     "timeframe": timeframe,
