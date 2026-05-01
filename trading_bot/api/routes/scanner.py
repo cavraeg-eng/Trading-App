@@ -1,8 +1,10 @@
 """Scanner routes for the trading bot API."""
 
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 
@@ -18,6 +20,7 @@ from trading_bot.api.routes.market import analyze_symbol
 from trading_bot.api.routes.predictions import _asset_class_for_symbol, build_prediction_response
 from trading_bot.config import get_logger
 from trading_bot.data.market_data_service import get_ohlcv_with_metadata
+from trading_bot.monitoring.bot_metrics import bot_metrics
 from trading_bot.persistence import repositories as repo
 from trading_bot.services.opportunity_ranker import rank_opportunity
 from trading_bot.services.scanner_engine import (
@@ -294,9 +297,18 @@ def evaluate_single_pair(
     groups: Optional[list[dict]] = None,
 ) -> Optional[dict]:
     """Evaluate a single pair against scanner conditions using real indicator data."""
+    bot_metrics.increment_counter(
+        "scanner.symbol_scanned",
+        context={"symbol": symbol, "timeframe": timeframe, "trade_style": trade_style},
+    )
     try:
         data, source_metadata = get_ohlcv_with_metadata(symbol, timeframe, trade_style=trade_style)
         if data is None or len(data) < 30:
+            bot_metrics.increment_counter(
+                "scanner.symbol_failed",
+                label="market_data_unavailable",
+                context={"symbol": symbol, "timeframe": timeframe, "trade_style": trade_style},
+            )
             return None
 
         indicator_map = build_indicator_snapshot(data, -1)
@@ -470,6 +482,11 @@ def evaluate_single_pair(
         }
 
     except Exception as e:
+        bot_metrics.increment_counter(
+            "scanner.symbol_failed",
+            label="evaluation_error",
+            context={"symbol": symbol, "timeframe": timeframe, "trade_style": trade_style},
+        )
         logger.warning(f"Scanner: failed to evaluate {symbol}: {e}")
         return None
 
@@ -507,6 +524,13 @@ def scan_symbols(config: ScannerConfig) -> tuple:
 @router.post("/scan")
 async def run_scan(config: ScannerConfig):
     """Run a scan with the given configuration."""
+    request_id = str(uuid4())
+    started = time.perf_counter()
+    context = {
+        "endpoint": "/api/scanner/scan",
+        "timeframe": config.timeframe,
+        "trade_style": config.trade_style,
+    }
     if config.timeframe not in SUPPORTED_TIMEFRAMES:
         raise HTTPException(
             status_code=400,
@@ -567,19 +591,32 @@ async def run_scan(config: ScannerConfig):
         elif cond.value2 is not None:
             warnings.append(f"{cond.indicator} value2 ignored because operator is {cond.operator}")
 
-    results, total_scanned = scan_symbols(config)
-    return {
-        "results": results,
-        "total_scanned": total_scanned,
-        "total_matches": len(results),
-        "warnings": warnings,
-        "meta": {
-            "timeframe": config.timeframe,
-            "trade_style": config.trade_style,
-            "logic": config.logic,
-            "groups": [{"name": group["name"], "logic": group["logic"], "conditions": len(group["conditions"])} for group in _group_descriptors(config)],
-        },
-    }
+    try:
+        results, total_scanned = scan_symbols(config)
+        bot_metrics.increment_counter("scanner.success", request_id=request_id, context=context)
+        return {
+            "results": results,
+            "total_scanned": total_scanned,
+            "total_matches": len(results),
+            "warnings": warnings,
+            "request_id": request_id,
+            "meta": {
+                "timeframe": config.timeframe,
+                "trade_style": config.trade_style,
+                "logic": config.logic,
+                "groups": [{"name": group["name"], "logic": group["logic"], "conditions": len(group["conditions"])} for group in _group_descriptors(config)],
+            },
+        }
+    except Exception:
+        bot_metrics.increment_counter("scanner.failure", request_id=request_id, context=context)
+        raise
+    finally:
+        bot_metrics.record_latency(
+            "scanner.batch",
+            (time.perf_counter() - started) * 1000,
+            request_id=request_id,
+            context=context,
+        )
 
 
 @router.get("/saved")

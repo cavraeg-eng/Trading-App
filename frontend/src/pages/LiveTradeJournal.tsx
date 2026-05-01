@@ -176,8 +176,10 @@ export default function LiveTradeJournal() {
     return [...rows].sort((first, second) => {
       if (sortKey === 'symbol_asc') return first.symbol.localeCompare(second.symbol)
       if (sortKey === 'pnl_desc' || sortKey === 'pnl_asc') {
-        const firstPnl = getEntryPnl(first) ?? Number.NEGATIVE_INFINITY
-        const secondPnl = getEntryPnl(second) ?? Number.NEGATIVE_INFINITY
+        const nullPnlSentinel = sortKey === 'pnl_asc' ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY
+        const firstPnl = getEntryPnl(first) ?? nullPnlSentinel
+        const secondPnl = getEntryPnl(second) ?? nullPnlSentinel
+        if (firstPnl === secondPnl) return 0
         return sortKey === 'pnl_desc' ? secondPnl - firstPnl : firstPnl - secondPnl
       }
       const firstTime = Date.parse(first.updated_at)

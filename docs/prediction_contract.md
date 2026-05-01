@@ -17,7 +17,9 @@
 - `correlation_symbols`
 - `features`
 
-`broker_context` carries optional broker/account details for risk-aware suggestions. `source_context` identifies the initiating surface, including scanner presets, watchlists, automation templates, live workspace, journal, or direct API calls.
+`broker_context` carries optional broker/account details for risk-aware suggestions. `source_context` identifies the initiating surface, including scanner presets, watchlists, automation templates, live workspace, journal, or direct API calls. The current heuristic adapter maps strategy modes to existing market-analysis trade styles as follows: `scalp` uses scalp data, while `swing`, `intraday`, `position`, and `automation` use the swing analysis path until dedicated model adapters exist for those modes.
+
+`broker_context` is advisory, optional, and sanitized. It may include balance/equity, margin availability, open position summaries, symbol exposure, configured risk percentage, daily loss limits, max exposure limits, trading mode, and a context timestamp. It must never include credentials, API keys, tokens, raw broker payloads, connection strings, or sensitive account identifiers. If account context is missing, partial, or stale, the response degrades gracefully with an explicit status and warning.
 
 ## Response shape
 
@@ -28,8 +30,12 @@
 - `symbol`, `asset_class`, `timeframe`, and `strategy_mode`
 - `recommendation`
 - numeric `confidence` and bucketed `confidence_band`
-- structured `rationale`
+- structured `rationale` with summary text, renderable evidence factors, conflicts, blockers, and next conditions
 - structured `warnings`
+- `account_context_status`
+- `account_risk_warnings`
+- advisory `position_size` and `position_size_reason`
+- advisory `trade_allowed`
 - `freshness` metadata
 - `latency` metadata
 - chart-ready `chart` overlays
@@ -47,6 +53,31 @@ Buy and sell responses must include:
 
 No-trade responses must include `no_trade_reason` and must not include actionable entry, stop, or target levels.
 
+## Explainable rationale
+
+`PredictionResponse.rationale` is a structured object that lets scanner, workspace, journal, and automation consumers render the explanation without parsing prose.
+
+The object includes:
+
+- `summary`: concise trader-readable explanation that avoids profitability promises.
+- `confidence_label`: stable confidence bucket for UI copy.
+- `primary_reasons`: supportive, weak, or neutral evidence factors.
+- `conflicts`: evidence that reduces conviction or warns against immediate action.
+- `blockers`: hard blockers that explain no-trade states.
+- `next_conditions`: conditions that must remain true or improve before action.
+
+Each rationale factor includes:
+
+- `category`: machine-readable contributor such as `trend`, `momentum`, `volatility`, `support_resistance`, `spread`, `account_risk`, `data_quality`, `confidence`, or `validation`.
+- `stance`: one of `supportive`, `conflicting`, `weak`, `neutral`, or `blocking`.
+- `strength`: one of `strong`, `medium`, or `weak`.
+- `message`: display-safe explanation text.
+- optional `direction`, `source`, and `weight`.
+
+Buy and sell suggestions must include `primary_reasons`. No-trade suggestions must include `blockers` and `next_conditions`. Hold suggestions should explain why waiting is preferred and what would need to improve before a trade becomes valid.
+
+Account-aware suggestions may block or downgrade otherwise actionable setups when advisory context shows stale account data, daily loss limit breaches, unavailable margin, exposure limit breaches, incompatible trading mode, or conflicting open positions. Broker execution safety gates remain authoritative and must still validate any order before placement.
+
 ## Recommendation states
 
 The contract supports four states:
@@ -61,8 +92,8 @@ The contract supports four states:
 ## Consumer compatibility
 
 - Scanner cards should use `suggestion_card`, `confidence_band`, `warnings`, and `no_trade_reason` for sorting, filtering, and display.
-- Live workspace charts should use `chart.entry_zone`, `chart.stop_loss`, `chart.take_profit_targets`, `chart.invalidation_level`, `chart.support`, and `chart.resistance`.
-- Journal records should persist `prediction_id`, `recommendation`, `confidence`, setup levels, and `rationale` with resulting trade outcomes.
+- Live workspace charts should use `chart.entry_zone`, `chart.stop_loss`, `chart.take_profit_targets`, `chart.invalidation_level`, `chart.support`, and `chart.resistance` for buy/sell recommendations. Hold and no-trade responses should render neutral state copy and avoid actionable trade overlays when those fields are absent.
+- Journal records should persist `prediction_id`, `recommendation`, `confidence`, setup levels, and structured `rationale` with resulting trade outcomes.
 - Automation should treat `no_trade` as a successful non-execution result. It should gate live orders on recommendation, confidence, freshness, warnings, risk/reward, and broker risk checks.
 
 ## API boundaries

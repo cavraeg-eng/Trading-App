@@ -21,6 +21,7 @@ from trading_bot.data.market_data_service import (
     get_ohlcv_with_metadata,
     map_symbol_to_yf,
 )
+from trading_bot.monitoring.bot_metrics import bot_metrics, classify_no_trade_reason
 from trading_bot.persistence import repositories as repo
 
 logger = get_logger(__name__)
@@ -761,11 +762,17 @@ def fetch_data_yf(symbol: str, timeframe: str) -> Optional[pd.DataFrame]:
     return get_ohlcv(symbol, timeframe, trade_style="swing")
 
 
-def analyze_symbol(symbol: str, timeframe: str, trade_style: str = "swing") -> Optional[dict]:
+def analyze_symbol(
+    symbol: str,
+    timeframe: str,
+    trade_style: str = "swing",
+    record_no_trade_reason: bool = False,
+) -> Optional[dict]:
     """Perform technical analysis on a symbol."""
     df, metadata = get_shared_ohlcv_with_metadata(symbol, timeframe, trade_style=trade_style)
     if df is None or len(df) < 30:
         return None
+    feature_started = time.perf_counter()
     
     # Get current values
     current_price = df["close"].iloc[-1]
@@ -1070,6 +1077,11 @@ def analyze_symbol(symbol: str, timeframe: str, trade_style: str = "swing") -> O
         signal = "hold"
         confidence = min(confidence, 52)
         reason = "data quality is degraded; directional signal suppressed"
+    bot_metrics.record_latency(
+        "prediction.feature_generation",
+        (time.perf_counter() - feature_started) * 1000,
+        context={"symbol": symbol, "timeframe": timeframe, "trade_style": trade_style},
+    )
     
     # Round with appropriate precision based on price magnitude
     decimals = get_decimal_places(current_price)
@@ -1110,29 +1122,39 @@ def analyze_symbol(symbol: str, timeframe: str, trade_style: str = "swing") -> O
     except Exception:
         _sentiment_score = None
 
-    ai_score = compute_ai_score(
-        signal, confidence, indicators, regime, patterns,
-        sentiment_score=_sentiment_score,
-        volume_ratio=volume_ratio,
-    )
-    pattern_accuracy = patterns[0]["successRate"] if patterns else None
-    anchor_performance = repo.get_signal_outcome_summary(
-        symbol=symbol,
-        timeframe=timeframe,
-        direction=signal.upper() if signal != "hold" else None,
-        limit=100,
-    )
-    signal, confidence, reason = _apply_anchor_history_adjustment(
-        signal,
-        confidence,
-        reason,
-        anchor_performance,
-    )
-    ai_score = compute_ai_score(
-        signal, confidence, indicators, regime, patterns,
-        sentiment_score=_sentiment_score,
-        volume_ratio=volume_ratio,
-    )
+    with bot_metrics.timer(
+        "prediction.scoring",
+        context={"symbol": symbol, "timeframe": timeframe, "trade_style": trade_style},
+    ):
+        ai_score = compute_ai_score(
+            signal, confidence, indicators, regime, patterns,
+            sentiment_score=_sentiment_score,
+            volume_ratio=volume_ratio,
+        )
+        pattern_accuracy = patterns[0]["successRate"] if patterns else None
+        anchor_performance = repo.get_signal_outcome_summary(
+            symbol=symbol,
+            timeframe=timeframe,
+            direction=signal.upper() if signal != "hold" else None,
+            limit=100,
+        )
+        signal, confidence, reason = _apply_anchor_history_adjustment(
+            signal,
+            confidence,
+            reason,
+            anchor_performance,
+        )
+        ai_score = compute_ai_score(
+            signal, confidence, indicators, regime, patterns,
+            sentiment_score=_sentiment_score,
+            volume_ratio=volume_ratio,
+        )
+    if signal == "hold" and record_no_trade_reason:
+        bot_metrics.increment_counter(
+            "no_trade_reason",
+            label=classify_no_trade_reason(reason),
+            context={"symbol": symbol, "timeframe": timeframe, "trade_style": trade_style},
+        )
 
     return {
         "currentPrice": current_rounded,
