@@ -747,7 +747,7 @@ function LiveTrading({
     setCurrentPnL(total)
   }, [positions])
 
-  const automationStartMode = normalizeTradingMode(activeBroker?.environment ?? backendBroker?.environment)
+  const automationMode = normalizeTradingMode(activeBroker?.environment ?? backendBroker?.environment ?? automationStatus?.mode)
 
   const handleToggleTrading = useCallback(async () => {
     if (isStartingTrading) return
@@ -766,11 +766,11 @@ function LiveTrading({
       setIsStartingTrading(true)
       try {
         // 1. Activate strategy in live mode
-        await api.activateStrategy(selectedStrategyId, automationStartMode, true)
+        await api.activateStrategy(selectedStrategyId, automationMode, true)
         // 2. Start automation worker in live mode with broker
-        await api.startAutomationWorker({ mode: automationStartMode, broker_id: activeBroker.id })
+        await api.startAutomationWorker({ mode: automationMode, broker_id: activeBroker.id })
         setIsTrading(true)
-        setOrderMessage({ type: 'success', message: `${automationStartMode === 'live' ? 'Live' : 'Paper'} AI trading started with ${strategies.find(s => s.id === selectedStrategyId)?.name || selectedStrategyId}` })
+        setOrderMessage({ type: 'success', message: `${automationMode === 'live' ? 'Live' : 'Paper'} AI trading started with ${strategies.find(s => s.id === selectedStrategyId)?.name || selectedStrategyId}` })
       } catch (err: any) {
         setOrderMessage({ type: 'error', message: err?.detail || 'Failed to start trading' })
       } finally {
@@ -789,7 +789,7 @@ function LiveTrading({
         setIsStartingTrading(false)
       }
     }
-  }, [isTrading, isStartingTrading, activeBroker, selectedStrategyId, strategies, automationStartMode])
+  }, [isTrading, isStartingTrading, activeBroker, selectedStrategyId, strategies, automationMode])
 
   // Handle position row click - select for chart sync
   const handlePositionClick = useCallback((pos: Position) => {
@@ -968,8 +968,7 @@ function LiveTrading({
   const workerRunning = automationStatus?.worker?.running ?? false
   const recentExecs = automationStatus?.executions ?? []
   const selectedStrategy = strategies.find((strategy) => strategy.id === selectedStrategyId) ?? automationStatus?.activeStrategy ?? null
-  const tradingMode = normalizeTradingMode(activeBroker?.environment ?? backendBroker?.environment ?? automationStatus?.mode)
-  const isLiveMode = tradingMode === 'live'
+  const isLiveMode = automationMode === 'live'
   const brokerReady = Boolean(activeBroker?.connected)
   const brokerConfigured = Boolean(activeBroker?.id || backendBroker?.id)
   const accountEquity = balance.total_equity ?? null
