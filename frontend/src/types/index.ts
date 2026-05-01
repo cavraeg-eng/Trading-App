@@ -116,7 +116,20 @@ export interface ScanResult {
   risk_gate?: 'low' | 'medium' | 'high';
   risk_context?: { volatility_regime: string; market_status: string };
   atr?: number;
+  scan_status?: 'matched' | 'warning' | 'error';
+  error_message?: string;
+  evaluation_latency_ms?: number;
+  prediction_latency_ms?: number;
   group_results?: Array<{ name: string; logic: string; passed: boolean; score: number; matched_count: number; total_count: number }>;
+}
+
+export interface ScannerRunMetadata {
+  batch_duration_ms?: number;
+  concurrency_limit?: number;
+  total_symbols?: number;
+  succeeded?: number;
+  failed?: number;
+  unmatched?: number;
 }
 
 export interface ScannerPreset {

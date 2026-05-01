@@ -14,6 +14,13 @@ def test_settings_defaults():
     assert settings.model_type == ModelType.PPO
     assert settings.initial_capital == 10000.0
     assert settings.max_position_size == 0.3
+    assert settings.scanner_max_concurrent == 4
+
+
+def test_scanner_concurrency_clamped():
+    assert Settings(scanner_max_concurrent=0).scanner_max_concurrent == 1
+    assert Settings(scanner_max_concurrent=99).scanner_max_concurrent == 12
+    assert Settings(scanner_max_concurrent="bad").scanner_max_concurrent == 4
 
 
 def test_symbol_list():

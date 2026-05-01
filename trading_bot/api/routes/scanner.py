@@ -1,7 +1,8 @@
 """Scanner routes for the trading bot API."""
 
+import asyncio
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from time import perf_counter
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -16,7 +17,7 @@ from trading_bot.api.models import (
 )
 from trading_bot.api.routes.market import analyze_symbol
 from trading_bot.api.routes.predictions import _asset_class_for_symbol, build_prediction_response
-from trading_bot.config import get_logger
+from trading_bot.config import get_logger, get_settings
 from trading_bot.data.market_data_service import get_ohlcv_with_metadata
 from trading_bot.persistence import repositories as repo
 from trading_bot.services.opportunity_ranker import rank_opportunity
@@ -37,11 +38,56 @@ from trading_bot.services.scanner_engine import (
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/scanner", tags=["scanner"])
+SCANNER_CONCURRENCY_FALLBACK = 4
 
 DEFAULT_PAIRS = [
     "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD",
     "USD/CAD", "NZD/USD", "XAU/USD", "BTC/USD", "US500", "EUR/GBP"
 ]
+
+
+def get_scanner_concurrency_limit(total_symbols: Optional[int] = None) -> int:
+    configured = getattr(get_settings(), "scanner_max_concurrent", SCANNER_CONCURRENCY_FALLBACK)
+    try:
+        value = int(configured)
+    except (TypeError, ValueError):
+        value = SCANNER_CONCURRENCY_FALLBACK
+    value = max(1, min(value, 12))
+    if total_symbols is None:
+        return value
+    return max(1, min(value, max(total_symbols, 1)))
+
+
+def _elapsed_ms(started_at: float) -> float:
+    return round((perf_counter() - started_at) * 1000, 2)
+
+
+def _scanner_error_result(
+    symbol: str,
+    error: object,
+    trade_style: str,
+    timeframe: str,
+    latency_ms: Optional[float] = None,
+) -> dict:
+    message = str(error) or "Scanner evaluation failed"
+    return {
+        "symbol": symbol,
+        "signal": "NEUTRAL",
+        "score": 0.0,
+        "matching_conditions": [],
+        "indicator_values": {},
+        "confidence": 0,
+        "market_regime": None,
+        "trade_style": trade_style,
+        "timeframe": timeframe,
+        "opportunity_score": 0,
+        "source_score": None,
+        "source_metadata": None,
+        "reason": message,
+        "scan_status": "error",
+        "error_message": message,
+        "evaluation_latency_ms": latency_ms,
+    }
 
 
 def _flatten_conditions(config: ScannerConfig) -> list[IndicatorCondition]:
@@ -453,6 +499,7 @@ def evaluate_single_pair(
                 "ageSeconds": prediction.freshness.cache_age_seconds,
                 "featureVersion": prediction.freshness.feature_version,
             },
+            "prediction_latency_ms": prediction.latency.total_latency_ms,
             "reason": reason,
             "group_results": group_results,
             "entry_range": (analysis or {}).get("entryRange"),
@@ -471,37 +518,106 @@ def evaluate_single_pair(
 
     except Exception as e:
         logger.warning(f"Scanner: failed to evaluate {symbol}: {e}")
-        return None
+        return _scanner_error_result(symbol, e, trade_style, timeframe)
 
 
-def scan_symbols(config: ScannerConfig) -> tuple:
-    """Scan symbols using real indicator evaluation with parallel execution."""
+async def evaluate_single_pair_async(
+    symbol: str,
+    conditions: list,
+    logic: str,
+    trade_style: str,
+    timeframe: str,
+    groups: Optional[list[dict]],
+    semaphore: asyncio.Semaphore,
+) -> Optional[dict]:
+    async with semaphore:
+        started_at = perf_counter()
+        try:
+            result = await asyncio.to_thread(
+                evaluate_single_pair,
+                symbol,
+                conditions,
+                logic,
+                trade_style,
+                timeframe,
+                groups,
+            )
+        except Exception as e:
+            logger.warning(f"Scanner async evaluation failed for {symbol}: {e}")
+            result = _scanner_error_result(symbol, e, trade_style, timeframe)
+
+        latency_ms = _elapsed_ms(started_at)
+        if result is None:
+            return None
+        result["evaluation_latency_ms"] = latency_ms
+        result.setdefault("scan_status", "matched")
+        if "prediction_latency_ms" not in result:
+            prediction_latency = ((result.get("prediction_latency") or {}).get("total_latency_ms"))
+            if prediction_latency is not None:
+                result["prediction_latency_ms"] = prediction_latency
+        return result
+
+
+async def scan_symbols(config: ScannerConfig) -> tuple:
+    """Scan symbols using bounded async evaluation."""
     pairs = config.pairs if config.pairs else DEFAULT_PAIRS
     logic = getattr(config, "logic", "AND") or "AND"
     conditions = _flatten_conditions(config)
     trade_style = getattr(config, "trade_style", None) or "swing"
     timeframe = getattr(config, "timeframe", None) or "1h"
     groups = _group_descriptors(config)
+    started_at = perf_counter()
+    concurrency_limit = get_scanner_concurrency_limit(len(pairs))
 
     if not conditions:
-        return [], len(pairs)
-
-    results = []
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {
-            executor.submit(evaluate_single_pair, symbol, conditions, logic, trade_style, timeframe, groups): symbol
-            for symbol in pairs
+        return [], len(pairs), {
+            "batch_duration_ms": _elapsed_ms(started_at),
+            "concurrency_limit": concurrency_limit,
+            "total_symbols": len(pairs),
+            "succeeded": 0,
+            "failed": 0,
+            "unmatched": len(pairs),
         }
-        for future in as_completed(futures):
-            try:
-                result = future.result()
-                if result is not None:
-                    results.append(result)
-            except Exception as e:
-                logger.warning(f"Scanner thread error for {futures[future]}: {e}")
 
-    results.sort(key=lambda x: (x.get("opportunity_score", 0), x["score"]), reverse=True)
-    return results, len(pairs)
+    semaphore = asyncio.Semaphore(concurrency_limit)
+    tasks = [
+        evaluate_single_pair_async(symbol, conditions, logic, trade_style, timeframe, groups, semaphore)
+        for symbol in pairs
+    ]
+    evaluated = await asyncio.gather(*tasks, return_exceptions=True)
+    input_order = {symbol: index for index, symbol in enumerate(pairs)}
+    successful_results = []
+    failed_results = []
+
+    for index, item in enumerate(evaluated):
+        if isinstance(item, Exception):
+            failed_results.append(_scanner_error_result(pairs[index], item, trade_style, timeframe))
+            continue
+        if item is None:
+            continue
+        if item.get("scan_status") == "error":
+            failed_results.append(item)
+        else:
+            successful_results.append(item)
+
+    successful_results.sort(
+        key=lambda item: (
+            -(item.get("opportunity_score") or 0),
+            -(item.get("score") or 0),
+            input_order.get(item["symbol"], 0),
+        )
+    )
+    failed_results.sort(key=lambda item: input_order.get(item["symbol"], 0))
+    results = successful_results + failed_results
+    meta = {
+        "batch_duration_ms": _elapsed_ms(started_at),
+        "concurrency_limit": concurrency_limit,
+        "total_symbols": len(pairs),
+        "succeeded": len(successful_results),
+        "failed": len(failed_results),
+        "unmatched": max(0, len(pairs) - len(successful_results) - len(failed_results)),
+    }
+    return results, len(pairs), meta
 
 
 @router.post("/scan")
@@ -567,17 +683,18 @@ async def run_scan(config: ScannerConfig):
         elif cond.value2 is not None:
             warnings.append(f"{cond.indicator} value2 ignored because operator is {cond.operator}")
 
-    results, total_scanned = scan_symbols(config)
+    results, total_scanned, scan_meta = await scan_symbols(config)
     return {
         "results": results,
         "total_scanned": total_scanned,
-        "total_matches": len(results),
+        "total_matches": scan_meta["succeeded"],
         "warnings": warnings,
         "meta": {
             "timeframe": config.timeframe,
             "trade_style": config.trade_style,
             "logic": config.logic,
             "groups": [{"name": group["name"], "logic": group["logic"], "conditions": len(group["conditions"])} for group in _group_descriptors(config)],
+            "scan": scan_meta,
         },
     }
 

@@ -62,6 +62,10 @@ class Settings(BaseSettings):
         default=3,
         description="Max retry attempts for yfinance requests"
     )
+    scanner_max_concurrent: int = Field(
+        default=4,
+        description="Max concurrent scanner symbol evaluations"
+    )
     
     # ── Cache TTLs ──
     spot_cache_ttl_scalp: int = Field(
@@ -214,6 +218,15 @@ class Settings(BaseSettings):
         if v not in valid_timeframes:
             raise ValueError(f"Invalid timeframe. Must be one of: {valid_timeframes}")
         return v
+
+    @field_validator("scanner_max_concurrent", mode="before")
+    @classmethod
+    def clamp_scanner_concurrency(cls, v: Union[str, int]) -> int:
+        try:
+            value = int(v)
+        except (TypeError, ValueError):
+            value = 4
+        return max(1, min(value, 12))
     
     @field_validator("data_dir", "db_path", "parquet_path", "model_path", "log_file", mode="before")
     @classmethod
