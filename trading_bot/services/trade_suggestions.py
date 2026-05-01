@@ -140,9 +140,6 @@ def _directionally_valid(
         if any(target.price >= min(entry_mid, current_price) - minimum_distance for target in targets):
             problems.append("Short take-profit target is not below entry/current price.")
 
-    if entry.max - entry.min < minimum_distance:
-        problems.append("Entry zone is narrower than the minimum price distance.")
-
     return problems
 
 
@@ -157,6 +154,10 @@ def _no_trade(
         warnings=warnings,
         annotations=annotations or [],
     )
+
+
+def _warnings(messages: list[str]) -> list[PredictionWarning]:
+    return [_warning(message) for message in messages]
 
 
 def generate_trade_suggestion(
@@ -213,7 +214,7 @@ def generate_trade_suggestion(
         )
 
     risk_distance = abs(entry_mid - stop_loss)
-    reward_distance = abs(targets[1].price - entry_mid) if len(targets) > 1 else abs(targets[0].price - entry_mid)
+    reward_distance = abs(targets[0].price - entry_mid)
     risk_reward = round(reward_distance / risk_distance, 2) if risk_distance > 0 else 0.0
     minimum_distance = max((atr or 0) * 0.05, abs(current_price) * 0.00005, 10 ** -6)
 
@@ -235,7 +236,7 @@ def generate_trade_suggestion(
             PredictionNoTradeReason.REWARD_RISK_COMPRESSED
             if any("Risk/reward" in problem for problem in validation_errors)
             else PredictionNoTradeReason.INSUFFICIENT_DATA,
-            [_warning(" ".join(validation_errors))],
+            _warnings(validation_errors),
             [{
                 "type": "validation",
                 "label": "Setup rejected",

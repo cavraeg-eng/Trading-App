@@ -40,11 +40,15 @@ def _score_source(metadata: Optional[Dict]) -> float:
     return max(0.0, min(1.0, score))
 
 
-def compute_risk_gate(analysis: Dict, source_metadata: Optional[Dict] = None) -> str:
+def compute_risk_gate(
+    analysis: Dict,
+    source_metadata: Optional[Dict] = None,
+    opportunity_score: Optional[float] = None,
+) -> str:
     """Compute a risk gate level based on volatility, data quality, and opportunity."""
     atr = float(analysis.get("atr", 0))
     current_price = float(analysis.get("currentPrice", 0))
-    opportunity_score = float(analysis.get("opportunityScore", 50))
+    opportunity_score_value = float(opportunity_score if opportunity_score is not None else 50)
     regime = analysis.get("marketRegime", "ranging")
     confidence = float(analysis.get("confidence", 50))
 
@@ -59,9 +63,9 @@ def compute_risk_gate(analysis: Dict, source_metadata: Optional[Dict] = None) ->
             risk_points += 1
 
     # Opportunity risk: very low opportunity score suggests unfavorable conditions
-    if opportunity_score < 30:
+    if opportunity_score_value < 30:
         risk_points += 2
-    elif opportunity_score < 50:
+    elif opportunity_score_value < 50:
         risk_points += 1
 
     # Regime risk
@@ -118,7 +122,7 @@ def rank_opportunity(analysis: Dict, source_metadata: Optional[Dict] = None) -> 
         "sourceScore": round(source_score * 100, 1),
         "regimeScore": round(regime_score * 100, 1),
         "signalStrength": signal,
-        "riskGate": compute_risk_gate(analysis, source_metadata),
+        "riskGate": compute_risk_gate(analysis, source_metadata, opportunity_score * 100),
     }
 
 

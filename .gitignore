@@ -21,11 +21,15 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.python-version
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.pyre/
+.nox/
 .tox/
 .coverage
+.coverage.*
 coverage.xml
 htmlcov/
 build/
@@ -50,12 +54,19 @@ wheels/
 venv/
 env/
 ENV/
+.conda/
 
 # Node / frontend
 node_modules/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/.cache/
+.npm/
+.pnpm-store/
+frontend/.turbo/
+frontend/.next/
+frontend/.nuxt/
 frontend/coverage/
 npm-debug.log*
 yarn-debug.log*
@@ -75,6 +86,11 @@ logs/
 *.sqlite3-*
 *.csv
 *.tsv
+*.parquet
+*.feather
+*.arrow
+*.hdf
+*.hdf5
 *credentials*.json
 *credential*.json
 
@@ -82,11 +98,22 @@ logs/
 models/
 !trading_bot/models/
 checkpoints/
+runs/
+mlruns/
+wandb/
+lightning_logs/
+tensorboard/
+experiments/
 *.pkl
 *.pickle
+*.joblib
 *.pt
 *.pth
 *.onnx
+*.h5
+*.keras
+*.ckpt
+*.safetensors
 
 # Local agent/tooling state
 .agents/
@@ -94,6 +121,7 @@ checkpoints/
 .qoder/
 .verdent/
 .tmp*/
+.tmp_*/
 tmp/
 temp/
 *.tmp
