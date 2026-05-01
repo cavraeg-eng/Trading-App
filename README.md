@@ -52,121 +52,187 @@ graph TB
 - Circuit breakers: Daily loss limits, consecutive loss detection
 - Emergency stop: Automatic position closure on critical events
 
-## Installation
+## Local Development Setup
 
 ### Prerequisites
 
-- Python 3.11+
-- Node.js 18+ and npm for the React frontend
+- Python 3.11 or 3.12
+- Node.js 18+ and npm 9+
 - Git
-- (Optional) Docker and Docker Compose
-- (Optional) Redis for live trading workflows; Docker Compose includes it
+- Optional: Docker and Docker Compose for the paper-trading/Streamlit stack
+- Optional: Redis on `localhost:6379` for live-trading workflows that use Redis
 
-### Fresh clone setup
+The FastAPI backend runs on `http://localhost:8010` during local development. The Vite frontend runs on `http://localhost:5180` and proxies relative `/api/*` requests to the backend.
 
-1. **Clone the repository**
+### 1. Clone and enter the repository
+
 ```bash
 git clone <repository-url>
-cd trading-bot
+cd <repository-directory>
 ```
 
-2. **Create a Python virtual environment**
-```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-python -m pip install --upgrade pip
-```
+### 2. Configure environment variables
 
-3. **Install backend dependencies**
-```bash
-pip install -r requirements.txt
-pip install -e .
-```
+Copy the example environment file and keep real credentials out of source control:
 
-4. **Install frontend dependencies**
-```bash
-cd frontend
-npm install
-cd ..
-```
-
-5. **Create local environment config**
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with local values only. The committed `.env.example` intentionally uses placeholders and safe defaults; never commit real API keys, broker tokens, account IDs, passwords, local databases, screenshots, logs, or model artifacts.
+For local UI and API development, the defaults are enough to boot the app in paper mode. Broker credentials, notification webhooks, Redis, and paid market-data keys are optional unless you are testing those integrations directly.
 
-### Required environment variables
+Important local settings:
 
-Most settings have safe defaults for paper/local development. Review these before running the app:
+- `TRADING_MODE=paper` keeps local development in paper-trading mode.
+- `DATA_DIR=./data`, `DB_PATH=./data/trading.db`, and `PARQUET_PATH=./data/parquet` control local SQLite and data storage.
+- `MODEL_PATH=./models` stores local model artifacts.
+- `LOG_FILE=./logs/trading_bot.log` stores local logs.
+- `GOLD_API_KEY`, `TELEGRAM_BOT_TOKEN`, `DISCORD_WEBHOOK_URL`, and exchange credentials can stay as placeholders for basic backend/frontend work.
+- Use demo, testnet, or paper credentials only while developing. Never put live broker keys in committed files.
 
-| Variable | Required | Purpose | Safe local default |
-| --- | --- | --- | --- |
-| `TRADING_MODE` | Yes | Selects `paper` or `live` trading mode. | `paper` |
-| `SYMBOLS` | Yes | Comma-separated trading symbols. | `BTC/USDT,ETH/USDT,SOL/USDT` |
-| `TIMEFRAME` | Yes | Candle timeframe used by strategies. | `1h` |
-| `INITIAL_CAPITAL` | Yes | Starting paper-trading capital. | `10000` |
-| `DATA_DIR` / `PARQUET_PATH` | Yes | Runtime market data storage. | `./data`, `./data/parquet` |
-| `DB_PATH` / `TRADING_BOT_DB_PATH` | Yes | SQLite database locations. | `./data/trading.db`, `./data/trading_bot.db` |
-| `MODEL_PATH` | Yes | Local trained model/checkpoint directory. | `./models` |
-| `LOG_LEVEL` / `LOG_FILE` | Yes | Runtime logging configuration. | `INFO`, `./logs/trading_bot.log` |
-| `BINANCE_API_KEY` / `BINANCE_SECRET_KEY` | Optional | Binance API access for exchange workflows. | Placeholder values |
-| `GOLD_API_KEY` / `COINGECKO_API_KEY` | Optional | Higher quality/rate-limit market data providers. | Placeholder values |
-| `REDIS_HOST` / `REDIS_PORT` / `REDIS_DB` / `REDIS_PASSWORD` | Optional | Redis cache/live workflow settings. | `localhost`, `6379`, `0`, blank |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DISCORD_WEBHOOK_URL` | Optional | Notification integrations. | Placeholder values |
-| `BACKEND_API_URL` / `FRONTEND_DEV_URL` | Optional | Local developer URLs. | `http://localhost:8010`, `http://localhost:5173` |
+The frontend does not require a separate `.env` file for local development because `frontend/vite.config.ts` proxies `/api` to `http://localhost:8010`. If the frontend cannot reach the API, verify that the backend is running on port `8010` and that the browser is opened at the Vite URL, not by loading files directly.
 
-Broker credentials for OANDA, Alpaca, and CCXT-based exchanges are entered through the Settings UI. Treat those credentials as secrets even in paper mode.
+### 3. Create local runtime directories
 
-### Run locally
-
-Start the FastAPI backend from the repository root:
+The backend creates these directories when settings are loaded, but creating them up front makes a fresh clone explicit:
 
 ```bash
-uvicorn trading_bot.api.server:app --reload --host 127.0.0.1 --port 8010
+mkdir -p data/parquet models logs
 ```
 
-Start the React frontend in another terminal:
+These directories contain local databases, downloaded data, model checkpoints, and logs. They are intentionally ignored by Git.
+
+### 4. Set up the backend
+
+Create and activate a virtual environment:
 
 ```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+```
+
+If `python3.11` is not installed but `python3` points to Python 3.11+, use:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Install backend dependencies and the local package:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install -e .
+```
+
+Start the FastAPI backend:
+
+```bash
+uvicorn trading_bot.api.server:app --reload --host 0.0.0.0 --port 8010
+```
+
+> **Note:** Binding to `0.0.0.0` exposes the backend to all network interfaces on your local machine. For local-only access, use `127.0.0.1` instead.
+
+Expected backend URLs:
+
+- Health check: `http://localhost:8010/api/health`
+- API docs: `http://localhost:8010/docs`
+- OpenAPI schema: `http://localhost:8010/openapi.json`
+
+On startup, the API initializes SQLite at `./data/trading.db`, restores paper-trading state when available, restores broker state when configured, and starts the automation worker.
+
+### 5. Set up the frontend
+
+In a second terminal:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Open `http://localhost:5180` in your browser (macOS: `open http://localhost:5180`, Linux: `xdg-open http://localhost:5180`, Windows: `start http://localhost:5180`). Vite is configured with `strictPort: true`, so the frontend should always use port `5180` locally.
+
+To create a production build:
+
+```bash
+cd frontend
+npm run build
+```
+
+The build output is written to `frontend/dist/`, which is ignored by Git.
+
+### 6. Run backend and frontend together
+
+Recommended local terminal layout:
+
+```bash
+# Terminal 1: backend
+source .venv/bin/activate
+uvicorn trading_bot.api.server:app --reload --host 0.0.0.0 --port 8010
+
+# Terminal 2: frontend
 cd frontend
 npm run dev
 ```
 
-The frontend runs at `http://localhost:5173` and proxies `/api` requests to `http://localhost:8010`.
-
-Optional CLI and Streamlit workflows:
+Smoke checks:
 
 ```bash
-python -m trading_bot.main --help
-python -m trading_bot.main dashboard --port 8501
+curl http://localhost:8010/api/health
+curl http://localhost:8010/api/broker/active
+open http://localhost:5180
 ```
 
-### Docker setup
+In the frontend, the backend status indicator should show the API as healthy. Broker status may be disconnected until you configure a broker integration, which is expected for basic local development.
+
+### Optional Docker Compose setup
+
+Docker Compose runs the paper-trading bot, the Streamlit dashboard, and Redis. It does not run the Vite React frontend.
 
 ```bash
-cp .env.example .env
-# Edit .env with local placeholder/test credentials before starting services.
 docker-compose up -d
 docker-compose logs -f trading-bot
 docker-compose down
 ```
 
-Docker mounts `./data`, `./models`, and `./logs` as runtime volumes. These folders are intentionally ignored by git.
+Useful Compose URLs and ports:
+
+- Streamlit dashboard: `http://localhost:8501`
+- Redis: `localhost:6379`
+
+The Compose stack mounts `./data`, `./models`, and `./logs` into the containers, so those directories remain local-only runtime state.
 
 ## Configuration
 
-The application reads `.env` through Pydantic settings in `trading_bot/config/settings.py`. Keep `.env.example` as the only committed environment template. Use `.env` for local values and rotate any credential that may have been copied into logs, screenshots, databases, or shared messages.
+Edit `.env` with your settings:
 
-Before opening a pull request, run the hygiene check:
+```env
+# Exchange API Keys (Binance)
+BINANCE_API_KEY=your_api_key_here
+BINANCE_SECRET_KEY=your_secret_key_here
+BINANCE_TESTNET=true
 
-```bash
-python release_validate.py --security
-git status --ignored
+# Trading Configuration
+TRADING_MODE=paper
+SYMBOLS=BTC/USDT,ETH/USDT,SOL/USDT
+TIMEFRAME=1h
+INITIAL_CAPITAL=10000
+
+# Risk Management
+MAX_DAILY_DRAWDOWN=0.05
+MAX_POSITION_SIZE=0.3
+RISK_PER_TRADE=0.02
+
+# Model Configuration
+MODEL_TYPE=PPO
+TIMESTEPS=100000
+
+# Notifications (optional)
+TELEGRAM_BOT_TOKEN=your_token
+TELEGRAM_CHAT_ID=your_chat_id
 ```
-
-`git status --ignored` should show local-only folders such as `.env`, `data/`, `logs/`, `models/`, frontend build output, screenshots, virtualenvs, and local tool state as ignored rather than tracked.
 
 ## Usage
 
@@ -341,17 +407,31 @@ trading_bot/
 - Trade history
 - Performance metrics
 
-## Testing
+## Validation
+
+Use the fastest targeted checks first, then run broader validation before release:
 
 ```bash
-# Run all tests
+# Backend import and smoke checks
+python -m compileall trading_bot
+python test_basic.py
+python test_minimal.py
+
+# Run all backend tests
 pytest
 
-# Run specific test file
-pytest trading_bot/tests/test_risk.py
+# Run a specific backend test file
+pytest trading_bot/tests/test_api_integration.py
 
-# Run with coverage
+# Run with coverage when needed
 pytest --cov=trading_bot --cov-report=html
+```
+
+Frontend checks:
+
+```bash
+cd frontend
+npm run build
 ```
 
 ### Release Validation
@@ -384,18 +464,67 @@ This checks secret/artifact hygiene, targeted backend broker and trade-ledger te
 
 ## Troubleshooting
 
-### Common Issues
+### Backend import or startup errors
 
-**Import errors**: Ensure all dependencies are installed
+Reinstall dependencies inside the active virtual environment:
+
 ```bash
-pip install -r requirements.txt
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
-**API connection errors**: Check API keys and testnet settings in `.env`
+Confirm the API module imports:
 
-**Out of memory**: Reduce batch size or observation window in configuration
+```bash
+python -c "from trading_bot.api.server import app; print(app.title)"
+```
 
-**Model not loading**: Ensure model file path is correct
+### SQLite, data, model, or log path errors
+
+Create the local runtime directories and check `.env` paths:
+
+```bash
+mkdir -p data/parquet models logs
+```
+
+The default database path is `./data/trading.db`. If startup fails while initializing or restoring persistence, remove only disposable local development databases after confirming you do not need their contents:
+
+```bash
+rm ./data/trading.db
+```
+
+### Frontend cannot reach the API
+
+- Start the backend on port `8010` with `uvicorn trading_bot.api.server:app --reload --host 0.0.0.0 --port 8010`.
+- Start the frontend with `npm run dev` from `frontend/` and open `http://localhost:5180`.
+- Use relative `/api/...` requests in frontend code so the Vite proxy can forward them.
+- If you change frontend ports, update the backend CORS allowlist in `trading_bot/api/server.py`.
+
+### Broker configuration problems
+
+- Basic local development does not require a connected broker.
+- Keep `TRADING_MODE=paper` unless intentionally testing live workflows.
+- Use testnet or demo credentials for local integration tests.
+- Check broker-specific credentials and environment settings in `.env` before using any live connection.
+
+### Market data provider issues
+
+- XAU/USD can use free public fallback sources without `GOLD_API_KEY`, but paid or authenticated providers may improve reliability.
+- Leave optional provider keys blank unless you are testing that provider.
+- If requests are rate-limited, wait for provider cooldowns or switch to cached/local workflows.
+
+### API connection errors
+
+Check that `.env` exists, the backend is running, and API keys/testnet settings match the integration you are testing. For frontend connection errors, verify the Vite proxy target in `frontend/vite.config.ts`.
+
+### Out of memory
+
+Reduce batch size, observation window, training timesteps, or the number of concurrent data requests in configuration.
+
+### Model not loading
+
+Ensure `MODEL_PATH` points to an existing local model directory and that the referenced model artifact exists under `./models`.
 
 ## Development
 
