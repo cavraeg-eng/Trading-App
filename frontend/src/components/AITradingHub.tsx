@@ -19,7 +19,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
-import type { AIScoreData, DetectedPattern, ForexPair, SignalStatus, AlignmentData, SignalBacktestResult, SourceMetadata, CopyTradePosition, CopyTradeStats } from '../types'
+import type { AIScoreData, DetectedPattern, ForexPair, SignalStatus, AlignmentData, SignalBacktestResult, SourceMetadata, CopyTradePosition, CopyTradeStats, NoTradeReasonDetail } from '../types'
 import api from '../lib/api'
 import { formatDateTimeWithZone } from '../lib/time'
 import { DataSourceBadge } from './DataSourceBadge'
@@ -71,6 +71,8 @@ interface AITradingHubProps {
     aiScore?: AIScoreData
     patterns?: DetectedPattern[]
     patternAccuracy?: number | null
+    confidenceBand?: string
+    noTradeReasons?: NoTradeReasonDetail[]
   }
   currentPrice: number
   priceChange: number
@@ -321,9 +323,10 @@ function AITradingHub({
   )
 
   const entryMid = (signalDetails.entryRange.min + signalDetails.entryRange.max) / 2
+  const isNoTrade = signalDetails.signal === 'hold' && Boolean(signalDetails.noTradeReasons?.length)
 
   const hasValidData =
-    signalDetails.stopLoss !== 0 &&
+    isNoTrade || signalDetails.stopLoss !== 0 &&
     signalDetails.stopLoss !== signalDetails.entryRange.min &&
     signalDetails.entryRange.min !== signalDetails.entryRange.max
 
@@ -448,6 +451,7 @@ function AITradingHub({
 
   const totalIndicators = bullish + bearish + neutral || 1
   const topPatterns = signalDetails.patterns ?? []
+  const noTradeReasons = signalDetails.noTradeReasons ?? []
 
   const freshnessMeta = useMemo(() => {
     if (dataFreshness === 'live') return { dot: 'bg-emerald-400', text: 'text-emerald-300', label: 'Live' }
@@ -554,7 +558,7 @@ function AITradingHub({
         <div className="flex items-center gap-3 flex-wrap">
           {/* Signal badge */}
           <span className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg font-extrabold text-lg leading-tight shadow-lg ${badgeColor}`}>
-            {signalLabel(signalDetails.signal)}
+            {isNoTrade ? 'NO TRADE' : signalLabel(signalDetails.signal)}
           </span>
 
           {/* Pair + price */}
@@ -637,6 +641,11 @@ function AITradingHub({
             />
           </div>
           <span className="text-sm font-bold text-trading-text w-10">{displayConf}%</span>
+          {signalDetails.confidenceBand && (
+            <span className="rounded-md border border-trading-border bg-trading-bg px-2 py-0.5 text-[11px] font-semibold uppercase text-trading-muted">
+              {signalDetails.confidenceBand.replace('_', ' ')}
+            </span>
+          )}
 
           {/* Regime */}
           <span className="hidden sm:flex items-center gap-1.5 text-xs text-trading-muted ml-2">
@@ -792,12 +801,28 @@ function AITradingHub({
             </div>
           )}
         </div>
+
+        {noTradeReasons.length > 0 && (
+          <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+            <div className="flex items-center gap-2 text-sm font-bold text-amber-300">
+              <AlertTriangle size={15} /> Stand aside — no-trade gates active
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {noTradeReasons.map((reason) => (
+                <span key={`${reason.code}-${reason.message}`} className="rounded-md border border-amber-500/20 bg-trading-bg/70 px-2 py-1 text-xs text-trading-text">
+                  <span className="font-semibold uppercase text-amber-300">{reason.code.replace(/_/g, ' ')}</span>
+                  <span className="text-trading-muted"> · {reason.message}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* ────────────────────────────────────────────────
           SECTION 2 — Trade Levels (two-column)
           ──────────────────────────────────────────────── */}
-      <section className="border-t border-trading-border px-5 py-4">
+      {!isNoTrade && <section className="border-t border-trading-border px-5 py-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
 
           {/* LEFT — Price Levels */}
@@ -984,7 +1009,7 @@ function AITradingHub({
             )}
           </div>
         </div>
-      </section>
+      </section>}
 
       {/* ────────────────────────────────────────────────
           SECTION 3 — Analysis & Action (tabbed)

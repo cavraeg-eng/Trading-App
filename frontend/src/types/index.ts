@@ -227,6 +227,13 @@ export interface SourceMetadata {
   marketStatus: 'live' | 'delayed' | 'stale' | 'unknown' | string;
 }
 
+export interface NoTradeReasonDetail {
+  code: string;
+  message: string;
+  blocking?: boolean;
+  context?: Record<string, unknown>;
+}
+
 export interface GoldContextData {
   symbol: string;
   timestamp: number;

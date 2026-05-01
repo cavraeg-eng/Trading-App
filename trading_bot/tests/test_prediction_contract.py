@@ -10,6 +10,7 @@ from trading_bot.api.models import (
     PredictionBrokerContext,
     PredictionChartOverlay,
     PredictionConfidenceBand,
+    PredictionNoTradeDetail,
     PredictionNoTradeReason,
     PredictionPositionContext,
     PredictionPriceZone,
@@ -26,6 +27,7 @@ from trading_bot.api.models import (
 )
 from trading_bot.api.routes import predictions
 from trading_bot.api.server import app
+from trading_bot.services.prediction_quality import PredictionQualityConfig, evaluate_prediction_quality
 
 
 def _request() -> PredictionRequest:
@@ -85,6 +87,12 @@ def test_no_trade_requires_machine_readable_reason_and_no_levels():
         PredictionResponse(**payload)
 
     payload["no_trade_reason"] = PredictionNoTradeReason.LOW_CONFIDENCE
+    payload["no_trade_reasons"] = [
+        PredictionNoTradeDetail(
+            code=PredictionNoTradeReason.LOW_CONFIDENCE,
+            message="Confidence is below the actionable threshold.",
+        )
+    ]
     response = PredictionResponse(**payload)
 
     assert response.no_trade_reason == PredictionNoTradeReason.LOW_CONFIDENCE
@@ -97,6 +105,12 @@ def test_no_trade_rejects_ambiguous_actionable_levels():
         "confidence": 31,
         "confidence_band": PredictionConfidenceBand.LOW,
         "no_trade_reason": PredictionNoTradeReason.CONFLICTING_SIGNALS,
+        "no_trade_reasons": [
+            PredictionNoTradeDetail(
+                code=PredictionNoTradeReason.CONFLICTING_SIGNALS,
+                message="Signals conflict.",
+            )
+        ],
         "entry": PredictionPriceZone(min=1.1, max=1.101),
     })
 
@@ -217,6 +231,106 @@ def test_incomplete_buy_levels_downgrade_to_no_trade_without_targets(monkeypatch
     assert response.no_trade_reason == PredictionNoTradeReason.INSUFFICIENT_DATA
     assert response.take_profit_targets == []
     assert response.chart.take_profit_targets == []
+    assert response.no_trade_reasons
+
+
+def _analysis(**overrides):
+    base = {
+        "currentPrice": 1.1,
+        "signal": "buy",
+        "confidence": 74,
+        "reason": "MACD bullish crossover, higher timeframes aligned bullish",
+        "entryRange": {"min": 1.099, "max": 1.101},
+        "stopLoss": 1.094,
+        "takeProfit1": 1.108,
+        "takeProfit2": 1.112,
+        "riskReward": 2.0,
+        "atr": 0.004,
+        "indicators": [
+            {"name": "RSI", "value": 42, "signal": "bullish"},
+            {"name": "MACD", "value": 0.001, "signal": "bullish"},
+            {"name": "EMA", "value": 1.098, "signal": "bullish"},
+        ],
+        "higherTimeframeBias": {"direction": "bullish", "strength": 0.8},
+        "anchorModel": {"support": 1.096, "resistance": 1.118},
+    }
+    base.update(overrides)
+    return base
+
+
+def _metadata(**overrides):
+    base = {
+        "sourceName": "test",
+        "sourceType": "fixture",
+        "priceSource": "fixture",
+        "isFallback": False,
+        "freshnessSeconds": 1,
+        "qualityFlags": [],
+        "marketStatus": "live",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_prediction_quality_allows_good_signal():
+    result = evaluate_prediction_quality(
+        _analysis(),
+        _metadata(),
+        config=PredictionQualityConfig(),
+    )
+
+    assert result.gates == []
+    assert result.confidence >= 74
+
+
+def test_prediction_quality_blocks_weak_signal():
+    result = evaluate_prediction_quality(
+        _analysis(confidence=41),
+        _metadata(),
+        config=PredictionQualityConfig(min_actionable_confidence=62),
+    )
+
+    assert any(gate.code == PredictionNoTradeReason.LOW_CONFIDENCE for gate in result.gates)
+
+
+def test_prediction_quality_blocks_stale_data():
+    result = evaluate_prediction_quality(
+        _analysis(),
+        _metadata(freshnessSeconds=1200, marketStatus="stale", qualityFlags=["stale_data"]),
+        config=PredictionQualityConfig(stale_data_seconds=900),
+    )
+
+    assert result.gates[0].code == PredictionNoTradeReason.STALE_DATA
+
+
+def test_prediction_quality_blocks_high_spread():
+    result = evaluate_prediction_quality(
+        _analysis(spreadBps=18),
+        _metadata(),
+        config=PredictionQualityConfig(max_spread_bps=8),
+    )
+
+    assert any(gate.code == PredictionNoTradeReason.EXCESSIVE_SPREAD for gate in result.gates)
+
+
+def test_prediction_response_no_trade_includes_reason_details(monkeypatch):
+    monkeypatch.setattr(
+        predictions,
+        "analyze_symbol",
+        lambda symbol, timeframe, trade_style="swing": _analysis(confidence=41),
+    )
+    monkeypatch.setattr(
+        predictions,
+        "get_ohlcv_with_metadata",
+        lambda symbol, timeframe, trade_style="swing": (None, _metadata()),
+    )
+
+    response = predictions.build_prediction_response(_request())
+
+    assert response.recommendation == PredictionRecommendation.NO_TRADE
+    assert response.no_trade_reason == PredictionNoTradeReason.LOW_CONFIDENCE
+    assert response.no_trade_reasons
+    assert response.entry is None
 
 
 def test_account_context_adds_position_size(monkeypatch):
@@ -367,6 +481,7 @@ def test_account_risk_blocks_conflicting_position(monkeypatch):
 
     assert response.recommendation == PredictionRecommendation.NO_TRADE
     assert response.no_trade_reason == PredictionNoTradeReason.RISK_LIMITS
+    assert response.no_trade_reasons
     assert response.trade_allowed is False
     assert any(warning.code == PredictionWarningCode.OPEN_POSITION_CONFLICT for warning in response.account_risk_warnings)
 
