@@ -92,6 +92,7 @@ class PredictionWarningCode(str, Enum):
     NEAR_MAJOR_EVENT = "near_major_event"
     BROKER_LIMITATION = "broker_limitation"
     MODEL_DEGRADED = "model_degraded"
+    UNSUPPORTED_ASSET = "unsupported_asset"
     ACCOUNT_CONTEXT_MISSING = "account_context_missing"
     ACCOUNT_CONTEXT_PARTIAL = "account_context_partial"
     ACCOUNT_CONTEXT_STALE = "account_context_stale"

@@ -214,7 +214,10 @@ def _context_status(request: PredictionRequest, now: datetime) -> PredictionAcco
     if context is None:
         return PredictionAccountContextStatus.MISSING
     if context.context_timestamp and context.max_context_age_seconds is not None:
-        age = (now - context.context_timestamp).total_seconds()
+        context_timestamp = context.context_timestamp
+        if context_timestamp.tzinfo is None or context_timestamp.tzinfo.utcoffset(context_timestamp) is None:
+            context_timestamp = context_timestamp.replace(tzinfo=timezone.utc)
+        age = (now - context_timestamp).total_seconds()
         if age > context.max_context_age_seconds:
             return PredictionAccountContextStatus.STALE
     has_balance = context.equity is not None or context.balance is not None
@@ -499,6 +502,7 @@ def _rationale(analysis: Optional[dict[str, Any]]) -> list[PredictionRationaleIt
 def _targets(analysis: dict[str, Any]) -> list[PredictionTarget]:
     targets: list[PredictionTarget] = []
     risk_reward = analysis.get("riskReward")
+    target_risk_reward = float(risk_reward) if risk_reward is not None else None
     for index, key in enumerate(("takeProfit1", "takeProfit2", "takeProfit3"), start=1):
         price = analysis.get(key)
         if price is None:
@@ -506,7 +510,7 @@ def _targets(analysis: dict[str, Any]) -> list[PredictionTarget]:
         targets.append(PredictionTarget(
             label=f"TP{index}",
             price=float(price),
-            reward_risk=float(risk_reward) if index == 2 and risk_reward is not None else None,
+            reward_risk=target_risk_reward,
         ))
     return targets
 
@@ -637,7 +641,7 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
         invalidation_level=invalidation,
         risk_reward=risk_reward,
         rationale=_rationale(analysis),
-        warnings=[*warnings, *account_risk_warnings],
+        warnings=warnings,
         account_risk_warnings=account_risk_warnings,
         account_context_status=account_context_status,
         position_size=position_size,
@@ -664,8 +668,8 @@ def _unsupported_asset_response(request: PredictionRequest) -> PredictionRespons
         no_trade_reason=PredictionNoTradeReason.UNSUPPORTED_ASSET,
         rationale=[PredictionRationaleItem(category="validation", summary=f"{request.symbol} is not supported.")],
         warnings=[_warning(
-            PredictionWarningCode.ACCOUNT_CONTEXT_MISSING,
-            "Account context was not evaluated because the asset is unsupported.",
+            PredictionWarningCode.UNSUPPORTED_ASSET,
+            "Prediction is unavailable because the asset is unsupported.",
         )],
         account_risk_warnings=[],
         account_context_status=_context_status(request, datetime.now(tz=timezone.utc)),

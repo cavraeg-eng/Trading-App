@@ -120,6 +120,7 @@ def test_contract_endpoint_documents_consumers():
     payload = response.json()
     assert "no_trade" in payload["recommendations"]
     assert "account_context_missing" in payload["warningCodes"]
+    assert "unsupported_asset" in payload["warningCodes"]
     assert "account_risk_warnings" in payload["optionalAccountRiskFields"]
     assert "low_confidence" in payload["noTradeReasons"]
     assert "scanner" in payload["compatibility"]
@@ -161,6 +162,126 @@ def test_hold_prediction_tolerates_missing_trade_levels(monkeypatch):
     assert response.entry is not None
     assert response.stop_loss is None
     assert response.risk_reward is None
+
+
+def test_naive_account_context_timestamp_is_handled(monkeypatch):
+    monkeypatch.setattr(
+        predictions,
+        "analyze_symbol",
+        lambda symbol, timeframe, trade_style="swing": {
+            "currentPrice": 1.1,
+            "signal": "hold",
+            "confidence": 52,
+            "reason": "indicators are mixed",
+        },
+    )
+    monkeypatch.setattr(
+        predictions,
+        "get_ohlcv_with_metadata",
+        lambda symbol, timeframe, trade_style="swing": (
+            None,
+            {
+                "sourceName": "test",
+                "sourceType": "fixture",
+                "priceSource": "fixture",
+                "isFallback": False,
+                "freshnessSeconds": 1,
+                "qualityFlags": [],
+                "marketStatus": "open",
+            },
+        ),
+    )
+
+    request = PredictionRequest(
+        symbol="EUR/USD",
+        asset_class=PredictionAssetClass.FOREX,
+        broker_context=PredictionBrokerContext(
+            equity=10000,
+            available_margin=9000,
+            risk_constraints=PredictionRiskConstraints(risk_percent=1.0),
+            context_timestamp=datetime(2026, 5, 1, 12, 0, 0),
+            max_context_age_seconds=1,
+        ),
+    )
+
+    response = predictions.build_prediction_response(request)
+
+    assert response.account_context_status == PredictionAccountContextStatus.STALE
+
+
+def test_account_risk_warnings_are_not_duplicated_in_general_warnings(monkeypatch):
+    monkeypatch.setattr(
+        predictions,
+        "analyze_symbol",
+        lambda symbol, timeframe, trade_style="swing": {
+            "currentPrice": 1.1,
+            "signal": "buy",
+            "confidence": 76,
+            "reason": "bullish continuation",
+            "entryRange": {"min": 1.1, "max": 1.1},
+            "stopLoss": 1.095,
+            "takeProfit1": 1.11,
+            "riskReward": 2.0,
+        },
+    )
+    monkeypatch.setattr(
+        predictions,
+        "get_ohlcv_with_metadata",
+        lambda symbol, timeframe, trade_style="swing": (
+            None,
+            {
+                "sourceName": "test",
+                "sourceType": "fixture",
+                "priceSource": "fixture",
+                "isFallback": False,
+                "freshnessSeconds": 1,
+                "qualityFlags": [],
+                "marketStatus": "open",
+            },
+        ),
+    )
+
+    response = predictions.build_prediction_response(_request())
+
+    assert response.account_risk_warnings
+    assert all(warning not in response.warnings for warning in response.account_risk_warnings)
+
+
+def test_primary_target_includes_reward_risk(monkeypatch):
+    monkeypatch.setattr(
+        predictions,
+        "analyze_symbol",
+        lambda symbol, timeframe, trade_style="swing": {
+            "currentPrice": 1.1,
+            "signal": "buy",
+            "confidence": 76,
+            "reason": "bullish continuation",
+            "entryRange": {"min": 1.1, "max": 1.1},
+            "stopLoss": 1.095,
+            "takeProfit1": 1.11,
+            "riskReward": 2.0,
+        },
+    )
+    monkeypatch.setattr(
+        predictions,
+        "get_ohlcv_with_metadata",
+        lambda symbol, timeframe, trade_style="swing": (
+            None,
+            {
+                "sourceName": "test",
+                "sourceType": "fixture",
+                "priceSource": "fixture",
+                "isFallback": False,
+                "freshnessSeconds": 1,
+                "qualityFlags": [],
+                "marketStatus": "open",
+            },
+        ),
+    )
+
+    response = predictions.build_prediction_response(_request())
+
+    assert response.take_profit_targets[0].reward_risk == 2.0
 
 
 def test_account_context_adds_position_size(monkeypatch):
