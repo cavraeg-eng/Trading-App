@@ -151,6 +151,23 @@ def test_hold_prediction_tolerates_missing_trade_levels(monkeypatch):
     response = predictions.build_prediction_response(_request())
 
     assert response.recommendation == PredictionRecommendation.HOLD
-    assert response.entry is not None
+    assert response.entry is None
+    assert response.chart.entry_zone is None
     assert response.stop_loss is None
     assert response.risk_reward is None
+
+
+def test_contract_endpoint_documents_strategy_mode_mapping():
+    client = TestClient(app)
+
+    response = client.get("/api/predictions/contract")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["strategyModeTradeStyleMap"] == {
+        "scalp": "scalp",
+        "swing": "swing",
+        "intraday": "swing",
+        "position": "swing",
+        "automation": "swing",
+    }
