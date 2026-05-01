@@ -151,6 +151,61 @@ def test_hold_prediction_tolerates_missing_trade_levels(monkeypatch):
     response = predictions.build_prediction_response(_request())
 
     assert response.recommendation == PredictionRecommendation.HOLD
-    assert response.entry is not None
+    assert response.entry is None
+    assert response.chart.entry_zone is None
     assert response.stop_loss is None
     assert response.risk_reward is None
+
+
+def test_contract_endpoint_documents_strategy_mode_mapping():
+    client = TestClient(app)
+
+    response = client.get("/api/predictions/contract")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["strategyModeTradeStyleMap"] == {
+        "scalp": "scalp",
+        "swing": "swing",
+        "intraday": "swing",
+        "position": "swing",
+        "automation": "swing",
+    }
+
+
+def test_incomplete_buy_levels_downgrade_to_no_trade_without_targets(monkeypatch):
+    monkeypatch.setattr(
+        predictions,
+        "analyze_symbol",
+        lambda symbol, timeframe, trade_style="swing": {
+            "currentPrice": 1.1,
+            "signal": "buy",
+            "confidence": 71,
+            "reason": "bullish but incomplete levels",
+            "entryRange": {"min": 1.1, "max": 1.101},
+            "takeProfit1": 1.11,
+        },
+    )
+    monkeypatch.setattr(
+        predictions,
+        "get_ohlcv_with_metadata",
+        lambda symbol, timeframe, trade_style="swing": (
+            None,
+            {
+                "sourceName": "test",
+                "sourceType": "fixture",
+                "priceSource": "fixture",
+                "isFallback": False,
+                "freshnessSeconds": 1,
+                "qualityFlags": [],
+                "marketStatus": "open",
+            },
+        ),
+    )
+
+    response = predictions.build_prediction_response(_request())
+
+    assert response.recommendation == PredictionRecommendation.NO_TRADE
+    assert response.no_trade_reason == PredictionNoTradeReason.INSUFFICIENT_DATA
+    assert response.take_profit_targets == []
+    assert response.chart.take_profit_targets == []

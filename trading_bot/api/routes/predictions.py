@@ -58,6 +58,12 @@ def _recommendation_from_signal(signal: object, confidence: float) -> Prediction
     return PredictionRecommendation.HOLD
 
 
+def _trade_style_for_strategy_mode(strategy_mode: PredictionStrategyMode) -> str:
+    if strategy_mode == PredictionStrategyMode.SCALP:
+        return "scalp"
+    return "swing"
+
+
 def _no_trade_reason(analysis: Optional[dict[str, Any]], metadata: dict[str, Any]) -> PredictionNoTradeReason:
     quality_flags = list(metadata.get("qualityFlags") or [])
     if analysis is None:
@@ -174,7 +180,7 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
         return _unsupported_asset_response(request)
 
     started_at = datetime.now(tz=timezone.utc)
-    trade_style = "scalp" if request.strategy_mode == PredictionStrategyMode.SCALP else "swing"
+    trade_style = _trade_style_for_strategy_mode(request.strategy_mode)
     analysis = analyze_symbol(request.symbol, request.timeframe, trade_style=trade_style)
     _, metadata = get_ohlcv_with_metadata(request.symbol, request.timeframe, trade_style=trade_style)
     elapsed_ms = (datetime.now(tz=timezone.utc) - started_at).total_seconds() * 1000
@@ -192,7 +198,7 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
 
     if recommendation == PredictionRecommendation.NO_TRADE:
         no_trade_reason = _no_trade_reason(analysis, metadata)
-    elif analysis:
+    elif analysis and recommendation in {PredictionRecommendation.BUY, PredictionRecommendation.SELL}:
         entry, stop_loss, targets, invalidation, risk_reward = _trade_setup_levels(analysis)
 
     if (
@@ -203,6 +209,7 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
         no_trade_reason = PredictionNoTradeReason.INSUFFICIENT_DATA
         entry = None
         stop_loss = None
+        targets = []
         invalidation = None
         risk_reward = None
 
@@ -305,6 +312,13 @@ async def get_prediction_contract() -> dict:
         ],
         "requiredForBuySell": ["entry", "stop_loss", "take_profit_targets", "risk_reward", "invalidation_level"],
         "requiredForNoTrade": ["no_trade_reason"],
+        "strategyModeTradeStyleMap": {
+            "scalp": "scalp",
+            "swing": "swing",
+            "intraday": "swing",
+            "position": "swing",
+            "automation": "swing",
+        },
     }
 
 

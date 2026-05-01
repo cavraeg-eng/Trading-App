@@ -17,7 +17,7 @@
 - `correlation_symbols`
 - `features`
 
-`broker_context` carries optional broker/account details for risk-aware suggestions. `source_context` identifies the initiating surface, including scanner presets, watchlists, automation templates, live workspace, journal, or direct API calls.
+`broker_context` carries optional broker/account details for risk-aware suggestions. `source_context` identifies the initiating surface, including scanner presets, watchlists, automation templates, live workspace, journal, or direct API calls. The current heuristic adapter maps strategy modes to existing market-analysis trade styles as follows: `scalp` uses scalp data, while `swing`, `intraday`, `position`, and `automation` use the swing analysis path until dedicated model adapters exist for those modes.
 
 ## Response shape
 
@@ -61,7 +61,7 @@ The contract supports four states:
 ## Consumer compatibility
 
 - Scanner cards should use `suggestion_card`, `confidence_band`, `warnings`, and `no_trade_reason` for sorting, filtering, and display.
-- Live workspace charts should use `chart.entry_zone`, `chart.stop_loss`, `chart.take_profit_targets`, `chart.invalidation_level`, `chart.support`, and `chart.resistance`.
+- Live workspace charts should use `chart.entry_zone`, `chart.stop_loss`, `chart.take_profit_targets`, `chart.invalidation_level`, `chart.support`, and `chart.resistance` for buy/sell recommendations. Hold and no-trade responses should render neutral state copy and avoid actionable trade overlays when those fields are absent.
 - Journal records should persist `prediction_id`, `recommendation`, `confidence`, setup levels, and `rationale` with resulting trade outcomes.
 - Automation should treat `no_trade` as a successful non-execution result. It should gate live orders on recommendation, confidence, freshness, warnings, risk/reward, and broker risk checks.
 
