@@ -18,6 +18,7 @@ import yfinance as yf
 
 from trading_bot.config import get_logger, get_settings
 from trading_bot.data.data_validator import validate_ohlcv, validate_spot_price
+from trading_bot.monitoring.bot_metrics import bot_metrics
 
 logger = get_logger(__name__)
 
@@ -287,6 +288,11 @@ def fetch_yf_sync(
 
             latency = (time.time() - t0) * 1000
             _health_tracker.record_success("yfinance", latency)
+            bot_metrics.record_latency(
+                "market_data.fetch",
+                latency,
+                context={"symbol": symbol, "source": "yfinance"},
+            )
 
             if df is not None and not df.empty:
                 df.columns = [c.lower().replace(" ", "_") for c in df.columns]
@@ -300,6 +306,22 @@ def fetch_yf_sync(
         except Exception as e:
             latency = (time.time() - t0) * 1000
             _health_tracker.record_failure("yfinance", str(e))
+            bot_metrics.record_latency(
+                "market_data.fetch",
+                latency,
+                context={"symbol": symbol, "source": "yfinance", "status": "error"},
+            )
+            bot_metrics.increment_counter(
+                "external_api.error",
+                label="yfinance",
+                context={"symbol": symbol, "source": "yfinance"},
+            )
+            if "timeout" in str(e).lower():
+                bot_metrics.increment_counter(
+                    "external_api.timeout",
+                    label="yfinance",
+                    context={"symbol": symbol, "source": "yfinance"},
+                )
             logger.warning(
                 f"yfinance attempt {attempt + 1}/{retries} failed for {symbol}: {e}"
             )
@@ -441,10 +463,31 @@ def get_ohlcv(
 
     # Check cache
     now = time.time()
+    cache_lookup_started = time.perf_counter()
     with _ohlcv_lock:
         cached = _ohlcv_cache.get(cache_key)
         if cached and (now - cached["timestamp"]) < ttl:
+            bot_metrics.record_latency(
+                "cache.lookup",
+                (time.perf_counter() - cache_lookup_started) * 1000,
+                context={"symbol": symbol, "timeframe": timeframe, "trade_style": trade_style},
+            )
+            bot_metrics.increment_counter(
+                "cache.hit",
+                label="ohlcv",
+                context={"symbol": symbol, "timeframe": timeframe, "trade_style": trade_style},
+            )
             return cached["df"]
+    bot_metrics.record_latency(
+        "cache.lookup",
+        (time.perf_counter() - cache_lookup_started) * 1000,
+        context={"symbol": symbol, "timeframe": timeframe, "trade_style": trade_style},
+    )
+    bot_metrics.increment_counter(
+        "cache.miss",
+        label="ohlcv",
+        context={"symbol": symbol, "timeframe": timeframe, "trade_style": trade_style},
+    )
 
     # ── Spot path ────────────────────────────────────────────────────────────
     if use_spot:
@@ -482,6 +525,7 @@ def get_ohlcv(
                         "spot_source": spot_source,
                         "metadata": metadata,
                     }
+                bot_metrics.record_market_data_observation(metadata)
                 return df
         logger.warning(f"Spot fetch failed for {symbol}, falling back to futures")
         _health_tracker.record_fallback("spot_api", "yfinance")
@@ -519,6 +563,7 @@ def get_ohlcv(
                 "source": "yfinance",
                 "metadata": metadata,
             }
+        bot_metrics.record_market_data_observation(metadata)
 
     return df
 
@@ -546,9 +591,20 @@ def get_ohlcv_with_metadata(
         ttl = 300 if timeframe == "1d" else 5
 
     now = time.time()
+    cache_lookup_started = time.perf_counter()
     with _ohlcv_lock:
         cached = _ohlcv_cache.get(cache_key)
         if cached and (now - cached["timestamp"]) < ttl:
+            bot_metrics.record_latency(
+                "cache.lookup",
+                (time.perf_counter() - cache_lookup_started) * 1000,
+                context={"symbol": symbol, "timeframe": timeframe, "trade_style": trade_style},
+            )
+            bot_metrics.increment_counter(
+                "cache.hit",
+                label="ohlcv",
+                context={"symbol": symbol, "timeframe": timeframe, "trade_style": trade_style},
+            )
             cached_source = cached.get("source", "unknown")
             cached_source_type = cached_source
             cached_quality_flags: List[str] = []
@@ -560,7 +616,7 @@ def get_ohlcv_with_metadata(
                 reference_timestamp = time.time()
             elif cached_source == "yfinance":
                 cached_source_type = "futures"
-            return cached["df"], cached.get(
+            metadata = cached.get(
                 "metadata",
                 build_source_metadata(
                     symbol,
@@ -574,6 +630,18 @@ def get_ohlcv_with_metadata(
                     reference_timestamp=reference_timestamp,
                 ),
             )
+            bot_metrics.record_market_data_observation(metadata)
+            return cached["df"], metadata
+    bot_metrics.record_latency(
+        "cache.lookup",
+        (time.perf_counter() - cache_lookup_started) * 1000,
+        context={"symbol": symbol, "timeframe": timeframe, "trade_style": trade_style},
+    )
+    bot_metrics.increment_counter(
+        "cache.miss",
+        label="ohlcv",
+        context={"symbol": symbol, "timeframe": timeframe, "trade_style": trade_style},
+    )
 
     quality_flags: List[str] = []
 
@@ -608,6 +676,7 @@ def get_ohlcv_with_metadata(
                         "source": "spot_adjusted",
                         "metadata": metadata,
                     }
+                bot_metrics.record_market_data_observation(metadata)
                 return df, metadata
         _health_tracker.record_fallback("spot_api", "yfinance")
         quality_flags.append("fallback_source")
@@ -644,6 +713,7 @@ def get_ohlcv_with_metadata(
                 "source": "yfinance",
                 "metadata": metadata,
             }
+        bot_metrics.record_market_data_observation(metadata)
 
     return df, metadata
 

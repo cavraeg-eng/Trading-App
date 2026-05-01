@@ -1,14 +1,17 @@
 """Dedicated AI Score endpoint."""
 
 import asyncio
+import time
+from uuid import uuid4
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from trading_bot.api.routes.market import analyze_symbol, compute_ai_score
+from trading_bot.api.routes.market import analyze_symbol
 from trading_bot.data.market_data_service import get_ohlcv_with_metadata
 from trading_bot.config import get_logger
+from trading_bot.monitoring.bot_metrics import bot_metrics
 from trading_bot.sentiment.analyzer import SentimentAnalyzer
 
 logger = get_logger(__name__)
@@ -68,50 +71,50 @@ async def get_ai_score(
 ) -> dict:
     """Return the AI score for *symbol* with full factor breakdown."""
 
-    analysis = analyze_symbol(symbol, timeframe, trade_style=trade_style)
-    if analysis is None:
-        raise HTTPException(status_code=503, detail=f"AI score unavailable for {symbol}")
-
-    # Extract values needed for score computation
-    signal = analysis["signal"]
-    confidence = analysis["confidence"]
-    indicators = analysis.get("indicators", [])
-    regime = analysis.get("marketRegime", "ranging")
-    patterns = analysis.get("patterns", [])
-    volume_ratio_val = None
-    # volume_ratio is already computed inside analyze_symbol; recompute from OHLCV
-    try:
-        from trading_bot.api.routes.market import get_shared_ohlcv
-        df = get_shared_ohlcv(symbol, timeframe, trade_style=trade_style)
-        if df is not None and len(df) >= 20:
-            current_vol = float(df["volume"].iloc[-1])
-            avg_vol = float(df["volume"].rolling(window=20).mean().iloc[-1])
-            if avg_vol > 0:
-                volume_ratio_val = current_vol / avg_vol
-    except Exception:
-        pass
-
-    sentiment_val = _get_sentiment_score(symbol)
-    metadata_timeframe = "1m" if trade_style == "scalp" and timeframe not in ("1m", "5m") else timeframe
-    _, metadata = get_ohlcv_with_metadata(symbol, metadata_timeframe, trade_style=trade_style)
-
-    score_data = compute_ai_score(
-        signal, confidence, indicators, regime, patterns,
-        sentiment_score=sentiment_val,
-        volume_ratio=volume_ratio_val,
-    )
-
-    change = _compute_change(score_data["value"], symbol)
-
-    return {
+    request_id = str(uuid4())
+    started = time.perf_counter()
+    context = {
+        "endpoint": "/api/ai/score",
         "symbol": symbol,
-        "tradeStyle": trade_style,
-        "score": score_data["value"],
-        "label": score_data["label"],
-        "change": change,
-        "dataSource": metadata.get("sourceName"),
-        "dataQuality": metadata.get("qualityFlags", []),
-        "freshnessSeconds": metadata.get("freshnessSeconds"),
-        "factors": score_data["factors"],
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "timeframe": timeframe,
+        "trade_style": trade_style,
     }
+    try:
+        analysis = analyze_symbol(
+            symbol,
+            timeframe,
+            trade_style=trade_style,
+            record_no_trade_reason=True,
+        )
+        if analysis is None:
+            bot_metrics.increment_counter("prediction.failure", request_id=request_id, context=context)
+            raise HTTPException(status_code=503, detail=f"AI score unavailable for {symbol}")
+
+        # Extract values needed for score computation
+        metadata_timeframe = "1m" if trade_style == "scalp" and timeframe not in ("1m", "5m") else timeframe
+        _, metadata = get_ohlcv_with_metadata(symbol, metadata_timeframe, trade_style=trade_style)
+        score_data = analysis.get("aiScore") or {"value": 0, "label": "Cautious", "factors": {}}
+
+        change = _compute_change(score_data["value"], symbol)
+        bot_metrics.increment_counter("prediction.success", request_id=request_id, context=context)
+
+        return {
+            "symbol": symbol,
+            "tradeStyle": trade_style,
+            "score": score_data["value"],
+            "label": score_data["label"],
+            "change": change,
+            "dataSource": metadata.get("sourceName"),
+            "dataQuality": metadata.get("qualityFlags", []),
+            "freshnessSeconds": metadata.get("freshnessSeconds"),
+            "factors": score_data["factors"],
+            "requestId": request_id,
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        }
+    finally:
+        bot_metrics.record_latency(
+            "prediction.endpoint",
+            (time.perf_counter() - started) * 1000,
+            request_id=request_id,
+            context=context,
+        )

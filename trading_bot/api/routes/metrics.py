@@ -4,6 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Query
 
+from trading_bot.monitoring.bot_metrics import bot_metrics
 from trading_bot.persistence import repositories as repo
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
@@ -27,3 +28,9 @@ async def get_ledger_metrics(
 ) -> dict:
     """Get live broker ledger performance metrics including MFE/MAE and R multiples."""
     return repo.get_trade_ledger_metrics(broker_id=broker_id, symbol=symbol, limit=limit)
+
+
+@router.get("/bot")
+async def get_bot_performance_metrics() -> dict:
+    """Get process-local AI bot latency and reliability metrics."""
+    return bot_metrics.snapshot()
