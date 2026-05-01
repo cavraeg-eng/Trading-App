@@ -55,11 +55,14 @@ graph TB
 ## Installation
 
 ### Prerequisites
+
 - Python 3.11+
+- Node.js 18+ and npm for the React frontend
 - Git
 - (Optional) Docker and Docker Compose
+- (Optional) Redis for live trading workflows; Docker Compose includes it
 
-### Setup
+### Fresh clone setup
 
 1. **Clone the repository**
 ```bash
@@ -67,66 +70,103 @@ git clone <repository-url>
 cd trading-bot
 ```
 
-2. **Create virtual environment**
+2. **Create a Python virtual environment**
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+python -m pip install --upgrade pip
 ```
 
-3. **Install dependencies**
+3. **Install backend dependencies**
 ```bash
 pip install -r requirements.txt
-# Or with pip install -e .
+pip install -e .
 ```
 
-4. **Configure environment**
+4. **Install frontend dependencies**
+```bash
+cd frontend
+npm install
+cd ..
+```
+
+5. **Create local environment config**
 ```bash
 cp .env.example .env
-# Edit .env with your API keys and settings
 ```
 
-### Docker Setup
+Edit `.env` with local values only. The committed `.env.example` intentionally uses placeholders and safe defaults; never commit real API keys, broker tokens, account IDs, passwords, local databases, screenshots, logs, or model artifacts.
+
+### Required environment variables
+
+Most settings have safe defaults for paper/local development. Review these before running the app:
+
+| Variable | Required | Purpose | Safe local default |
+| --- | --- | --- | --- |
+| `TRADING_MODE` | Yes | Selects `paper` or `live` trading mode. | `paper` |
+| `SYMBOLS` | Yes | Comma-separated trading symbols. | `BTC/USDT,ETH/USDT,SOL/USDT` |
+| `TIMEFRAME` | Yes | Candle timeframe used by strategies. | `1h` |
+| `INITIAL_CAPITAL` | Yes | Starting paper-trading capital. | `10000` |
+| `DATA_DIR` / `PARQUET_PATH` | Yes | Runtime market data storage. | `./data`, `./data/parquet` |
+| `DB_PATH` / `TRADING_BOT_DB_PATH` | Yes | SQLite database locations. | `./data/trading.db`, `./data/trading_bot.db` |
+| `MODEL_PATH` | Yes | Local trained model/checkpoint directory. | `./models` |
+| `LOG_LEVEL` / `LOG_FILE` | Yes | Runtime logging configuration. | `INFO`, `./logs/trading_bot.log` |
+| `BINANCE_API_KEY` / `BINANCE_SECRET_KEY` | Optional | Binance API access for exchange workflows. | Placeholder values |
+| `GOLD_API_KEY` / `COINGECKO_API_KEY` | Optional | Higher quality/rate-limit market data providers. | Placeholder values |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_DB` / `REDIS_PASSWORD` | Optional | Redis cache/live workflow settings. | `localhost`, `6379`, `0`, blank |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DISCORD_WEBHOOK_URL` | Optional | Notification integrations. | Placeholder values |
+| `BACKEND_API_URL` / `FRONTEND_DEV_URL` | Optional | Local developer URLs. | `http://localhost:8010`, `http://localhost:5173` |
+
+Broker credentials for OANDA, Alpaca, and CCXT-based exchanges are entered through the Settings UI. Treat those credentials as secrets even in paper mode.
+
+### Run locally
+
+Start the FastAPI backend from the repository root:
 
 ```bash
-# Build and run with Docker Compose
+uvicorn trading_bot.api.server:app --reload --host 127.0.0.1 --port 8010
+```
+
+Start the React frontend in another terminal:
+
+```bash
+cd frontend
+npm run dev
+```
+
+The frontend runs at `http://localhost:5173` and proxies `/api` requests to `http://localhost:8010`.
+
+Optional CLI and Streamlit workflows:
+
+```bash
+python -m trading_bot.main --help
+python -m trading_bot.main dashboard --port 8501
+```
+
+### Docker setup
+
+```bash
+cp .env.example .env
+# Edit .env with local placeholder/test credentials before starting services.
 docker-compose up -d
-
-# View logs
 docker-compose logs -f trading-bot
-
-# Stop services
 docker-compose down
 ```
 
+Docker mounts `./data`, `./models`, and `./logs` as runtime volumes. These folders are intentionally ignored by git.
+
 ## Configuration
 
-Edit `.env` file with your settings:
+The application reads `.env` through Pydantic settings in `trading_bot/config/settings.py`. Keep `.env.example` as the only committed environment template. Use `.env` for local values and rotate any credential that may have been copied into logs, screenshots, databases, or shared messages.
 
-```env
-# Exchange API Keys (Binance)
-BINANCE_API_KEY=your_api_key_here
-BINANCE_SECRET_KEY=your_secret_key_here
-BINANCE_TESTNET=true
+Before opening a pull request, run the hygiene check:
 
-# Trading Configuration
-TRADING_MODE=paper
-SYMBOLS=BTC/USDT,ETH/USDT,SOL/USDT
-TIMEFRAME=1h
-INITIAL_CAPITAL=10000
-
-# Risk Management
-MAX_DAILY_DRAWDOWN=0.05
-MAX_POSITION_SIZE=0.3
-RISK_PER_TRADE=0.02
-
-# Model Configuration
-MODEL_TYPE=PPO
-TIMESTEPS=100000
-
-# Notifications (optional)
-TELEGRAM_BOT_TOKEN=your_token
-TELEGRAM_CHAT_ID=your_chat_id
+```bash
+python release_validate.py --security
+git status --ignored
 ```
+
+`git status --ignored` should show local-only folders such as `.env`, `data/`, `logs/`, `models/`, frontend build output, screenshots, virtualenvs, and local tool state as ignored rather than tracked.
 
 ## Usage
 
