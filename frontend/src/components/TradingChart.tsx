@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, memo, Component, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, memo, Component, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import {
   CandlestickSeries,
@@ -376,6 +376,7 @@ function TradingChart({
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const priceLineRefs = useRef<Map<string, IPriceLine>>(new Map());
   const autoScrollRef = useRef(true);
+  const chartCandlesRef = useRef<CandlePoint[]>([]);
   const safeSignals = signals ?? EMPTY_TRADE_LEVELS;
 
   const chartAreaStyle: React.CSSProperties = {
@@ -633,6 +634,22 @@ function TradingChart({
     return clampPercent(((overlayPriceRange.max - value) / range) * 100);
   };
 
+  const applyCandlesToChart = useCallback((nextCandles: CandlePoint[]) => {
+    const series = seriesRef.current;
+    if (!series) return;
+
+    const chartData = nextCandles.map(toChartCandle);
+    chartCandlesRef.current = nextCandles;
+    series.setData(chartData);
+    if (chartData.length && autoScrollRef.current) {
+      const visibleFrom = Math.max(0, chartData.length - VISIBLE_CANDLE_ESTIMATE);
+      chartRef.current?.timeScale().setVisibleLogicalRange({
+        from: visibleFrom,
+        to: chartData.length + 8,
+      });
+    }
+  }, []);
+
   useEffect(() => {
     const updateCountdown = () => {
       setBarCloseCountdown(formatCountdown(getRemainingBarCloseMs(effectiveTf)));
@@ -659,6 +676,8 @@ function TradingChart({
       }
     };
 
+    setCandles([]);
+    applyCandlesToChart([]);
     void fetchCandles();
     const intervalId = window.setInterval(() => void fetchCandles(), 15_000);
 
@@ -666,22 +685,11 @@ function TradingChart({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [effectiveTf, pair.symbol, resolvedTradeStyle]);
+  }, [applyCandlesToChart, effectiveTf, pair.symbol, resolvedTradeStyle]);
 
   useEffect(() => {
-    const series = seriesRef.current;
-    if (!series) return;
-
-    const chartData = candles.map(toChartCandle);
-    series.setData(chartData);
-    if (chartData.length && autoScrollRef.current) {
-      const visibleFrom = Math.max(0, chartData.length - VISIBLE_CANDLE_ESTIMATE);
-      chartRef.current?.timeScale().setVisibleLogicalRange({
-        from: visibleFrom,
-        to: chartData.length + 8,
-      });
-    }
-  }, [candles]);
+    applyCandlesToChart(candles);
+  }, [applyCandlesToChart, candles]);
 
   useEffect(() => {
     let cancelled = false;
@@ -694,14 +702,12 @@ function TradingChart({
         const quote = await api.fetchQuote(pair.symbol, effectiveTf, resolvedTradeStyle);
         if (cancelled || !isFinitePrice(quote.currentPrice)) return;
 
-        setCandles((currentCandles) => {
-          const updatedCandles = upsertLiveQuote(currentCandles, quote.currentPrice, effectiveTf);
-          const latestCandle = updatedCandles[updatedCandles.length - 1];
-          if (latestCandle) {
-            seriesRef.current?.update(toChartCandle(latestCandle));
-          }
-          return updatedCandles;
-        });
+        const updatedCandles = upsertLiveQuote(chartCandlesRef.current, quote.currentPrice, effectiveTf);
+        const latestCandle = updatedCandles[updatedCandles.length - 1];
+        chartCandlesRef.current = updatedCandles;
+        if (latestCandle) {
+          seriesRef.current?.update(toChartCandle(latestCandle));
+        }
       } catch {
       } finally {
         inFlight = false;
@@ -795,6 +801,7 @@ function TradingChart({
     priceLineRefs.current = new Map();
 
     const chartData = candles.map(toChartCandle);
+    chartCandlesRef.current = candles;
     series.setData(chartData);
     if (chartData.length) {
       const visibleFrom = Math.max(0, chartData.length - VISIBLE_CANDLE_ESTIMATE);
