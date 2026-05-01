@@ -74,6 +74,14 @@ class PredictionNoTradeReason(str, Enum):
     AUTOMATION_DISABLED = "automation_disabled"
 
 
+class PredictionAccountContextStatus(str, Enum):
+    """Availability state for account-aware prediction context."""
+    AVAILABLE = "available"
+    PARTIAL = "partial"
+    MISSING = "missing"
+    STALE = "stale"
+
+
 class PredictionWarningCode(str, Enum):
     """Warning codes that do not necessarily invalidate a prediction."""
     FALLBACK_DATA = "fallback_data"
@@ -84,18 +92,59 @@ class PredictionWarningCode(str, Enum):
     NEAR_MAJOR_EVENT = "near_major_event"
     BROKER_LIMITATION = "broker_limitation"
     MODEL_DEGRADED = "model_degraded"
+    ACCOUNT_CONTEXT_MISSING = "account_context_missing"
+    ACCOUNT_CONTEXT_PARTIAL = "account_context_partial"
+    ACCOUNT_CONTEXT_STALE = "account_context_stale"
+    POSITION_SIZING_UNAVAILABLE = "position_sizing_unavailable"
+    DAILY_LOSS_LIMIT = "daily_loss_limit"
+    MARGIN_PRESSURE = "margin_pressure"
+    EXPOSURE_LIMIT = "exposure_limit"
+    OPEN_POSITION_CONFLICT = "open_position_conflict"
+    TRADING_MODE_BLOCKED = "trading_mode_blocked"
+    RISK_LIMITS = "risk_limits"
+
+
+class PredictionPositionContext(BaseModel):
+    """Sanitized open-position summary for account-aware predictions."""
+    symbol: str
+    side: Optional[str] = None
+    quantity: Optional[float] = None
+    average_price: Optional[float] = None
+    current_price: Optional[float] = None
+    unrealized_pnl: Optional[float] = None
+    notional_exposure: Optional[float] = None
+
+
+class PredictionRiskConstraints(BaseModel):
+    """Optional advisory risk constraints supplied to prediction requests."""
+    risk_percent: Optional[float] = None
+    daily_loss_limit: Optional[float] = None
+    daily_pnl: Optional[float] = None
+    max_position_size: Optional[float] = None
+    max_position_notional: Optional[float] = None
+    max_open_positions: Optional[int] = None
+    max_symbol_exposure: Optional[float] = None
+    max_total_exposure: Optional[float] = None
+    trading_mode: Optional[str] = None
 
 
 class PredictionBrokerContext(BaseModel):
     """Optional broker/account context for risk-aware prediction requests."""
     broker_id: Optional[str] = None
-    account_id: Optional[str] = None
+    account_id: Optional[str] = Field(default=None, exclude=True)
     account_mode: Optional[str] = None
     base_currency: Optional[str] = None
+    balance: Optional[float] = None
     equity: Optional[float] = None
     available_margin: Optional[float] = None
+    used_margin: Optional[float] = None
+    margin_level: Optional[float] = None
     open_positions: int = 0
+    positions: List[PredictionPositionContext] = []
     max_risk_percent: Optional[float] = None
+    risk_constraints: Optional[PredictionRiskConstraints] = None
+    context_timestamp: Optional[datetime] = None
+    max_context_age_seconds: Optional[float] = 300.0
 
 
 class PredictionSourceContext(BaseModel):
@@ -198,6 +247,16 @@ class PredictionSuggestionCard(BaseModel):
     action_label: Optional[str] = None
 
 
+class PredictionPositionSize(BaseModel):
+    """Advisory position sizing output for a prediction response."""
+    quantity: float
+    unit: str = "units"
+    risk_amount: float
+    risk_percent: float
+    stop_distance: float
+    notional: Optional[float] = None
+
+
 class PredictionResponse(BaseModel):
     """Stable AI prediction/suggestion response contract.
 
@@ -223,6 +282,11 @@ class PredictionResponse(BaseModel):
     risk_reward: Optional[float] = None
     rationale: List[PredictionRationaleItem]
     warnings: List[PredictionWarning] = []
+    account_risk_warnings: List[PredictionWarning] = []
+    account_context_status: PredictionAccountContextStatus = PredictionAccountContextStatus.MISSING
+    position_size: Optional[PredictionPositionSize] = None
+    position_size_reason: Optional[str] = None
+    trade_allowed: bool = True
     freshness: PredictionFreshnessMetadata = Field(default_factory=PredictionFreshnessMetadata)
     latency: PredictionLatencyMetadata = Field(default_factory=PredictionLatencyMetadata)
     chart: PredictionChartOverlay
