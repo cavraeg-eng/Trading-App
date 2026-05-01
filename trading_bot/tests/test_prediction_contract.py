@@ -23,6 +23,10 @@ from trading_bot.api.routes import predictions
 from trading_bot.api.server import app
 
 
+def setup_function():
+    predictions.clear_prediction_cache()
+
+
 def _request() -> PredictionRequest:
     return PredictionRequest(
         symbol="EUR/USD",
@@ -118,6 +122,7 @@ def test_contract_endpoint_documents_consumers():
     assert "scanner" in payload["compatibility"]
     assert "freshness" in payload["requiredForEveryResponse"]
     assert "entry" in payload["requiredForBuySell"]
+    assert "cache_status" in payload["freshnessMetadata"]
 
 
 def test_hold_prediction_tolerates_missing_trade_levels(monkeypatch):
@@ -154,3 +159,114 @@ def test_hold_prediction_tolerates_missing_trade_levels(monkeypatch):
     assert response.entry is not None
     assert response.stop_loss is None
     assert response.risk_reward is None
+    assert response.freshness.cache_status == "miss"
+
+
+def test_prediction_cache_hits_for_same_latest_candle(monkeypatch):
+    calls = {"analysis": 0}
+
+    def fake_analysis(symbol, timeframe, trade_style="swing"):
+        calls["analysis"] += 1
+        return {
+            "currentPrice": 1.1,
+            "signal": "hold",
+            "confidence": 52,
+            "reason": "indicators are mixed",
+        }
+
+    monkeypatch.setattr(predictions, "analyze_symbol", fake_analysis)
+    monkeypatch.setattr(
+        predictions,
+        "get_ohlcv_with_metadata",
+        lambda symbol, timeframe, trade_style="swing": (
+            None,
+            {
+                "sourceName": "test",
+                "sourceType": "fixture",
+                "priceSource": "fixture",
+                "isFallback": False,
+                "freshnessSeconds": 1,
+                "lastBarTimestamp": 1_700_000_000,
+                "qualityFlags": [],
+                "marketStatus": "open",
+            },
+        ),
+    )
+
+    first = predictions.build_prediction_response(_request())
+    second = predictions.build_prediction_response(_request())
+
+    assert calls["analysis"] == 1
+    assert first.freshness.cache_status == "miss"
+    assert second.freshness.cache_status == "hit"
+    assert second.freshness.cache_key == first.freshness.cache_key
+    assert second.freshness.cache_age_seconds is not None
+
+
+def test_prediction_cache_misses_when_latest_candle_changes(monkeypatch):
+    calls = {"analysis": 0, "metadata": 0}
+
+    def fake_analysis(symbol, timeframe, trade_style="swing"):
+        calls["analysis"] += 1
+        return {
+            "currentPrice": 1.1,
+            "signal": "hold",
+            "confidence": 52,
+            "reason": "indicators are mixed",
+        }
+
+    def fake_metadata(symbol, timeframe, trade_style="swing"):
+        calls["metadata"] += 1
+        return None, {
+            "sourceName": "test",
+            "sourceType": "fixture",
+            "priceSource": "fixture",
+            "isFallback": False,
+            "freshnessSeconds": 1,
+            "lastBarTimestamp": 1_700_000_000 + calls["metadata"],
+            "qualityFlags": [],
+            "marketStatus": "open",
+        }
+
+    monkeypatch.setattr(predictions, "analyze_symbol", fake_analysis)
+    monkeypatch.setattr(predictions, "get_ohlcv_with_metadata", fake_metadata)
+
+    first = predictions.build_prediction_response(_request())
+    second = predictions.build_prediction_response(_request())
+
+    assert calls["analysis"] == 2
+    assert first.freshness.cache_status == "miss"
+    assert second.freshness.cache_status == "miss"
+    assert second.freshness.cache_key != first.freshness.cache_key
+
+
+def test_prediction_warmup_is_best_effort(monkeypatch):
+    def fake_response(request):
+        if request.symbol == "BAD/USD":
+            raise RuntimeError("provider down")
+        return PredictionResponse(
+            prediction_id="warm",
+            request=request,
+            symbol=request.symbol,
+            asset_class=request.asset_class,
+            timeframe=request.timeframe,
+            strategy_mode=request.strategy_mode,
+            recommendation=PredictionRecommendation.HOLD,
+            confidence=52,
+            confidence_band=PredictionConfidenceBand.MEDIUM,
+            rationale=[PredictionRationaleItem(category="summary", summary="Warmup")],
+            chart=PredictionChartOverlay(),
+            suggestion_card=PredictionSuggestionCard(title=request.symbol, badge="Hold", summary="Warmup"),
+        )
+
+    monkeypatch.setattr(predictions, "build_prediction_response", fake_response)
+
+    import asyncio
+    result = asyncio.run(predictions.warm_prediction_cache(predictions.PredictionWarmupRequest(
+        symbols=["EUR/USD", "BAD/USD"],
+        timeframes=["1h"],
+    )))
+
+    assert len(result["warmed"]) == 1
+    assert len(result["failed"]) == 1
+    assert result["failed"][0]["symbol"] == "BAD/USD"

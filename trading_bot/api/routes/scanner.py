@@ -6,8 +6,16 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
-from trading_bot.api.models import IndicatorCondition, ScannerConfig
+from trading_bot.api.models import (
+    IndicatorCondition,
+    PredictionRequest,
+    PredictionSourceContext,
+    PredictionSourceType,
+    PredictionStrategyMode,
+    ScannerConfig,
+)
 from trading_bot.api.routes.market import analyze_symbol
+from trading_bot.api.routes.predictions import _asset_class_for_symbol, build_prediction_response
 from trading_bot.config import get_logger
 from trading_bot.data.market_data_service import get_ohlcv_with_metadata
 from trading_bot.persistence import repositories as repo
@@ -402,6 +410,18 @@ def evaluate_single_pair(
             safe_indicators[k] = round(safe_float(v), 4)
 
         analysis = analyze_symbol(symbol, timeframe, trade_style=trade_style)
+        prediction_request = PredictionRequest(
+            symbol=symbol,
+            asset_class=_asset_class_for_symbol(symbol),
+            timeframe=timeframe,
+            strategy_mode=PredictionStrategyMode.SCALP if trade_style == "scalp" else PredictionStrategyMode.SWING,
+            source_context=PredictionSourceContext(source_type=PredictionSourceType.SCANNER),
+        )
+        prediction = build_prediction_response(
+            prediction_request,
+            analysis_override=analysis,
+            metadata_override=source_metadata,
+        )
         ranking = rank_opportunity(analysis or {}, source_metadata)
 
         # Build an improved reason that blends analysis rationale with matched conditions
@@ -426,6 +446,13 @@ def evaluate_single_pair(
             "opportunity_score": ranking.get("opportunityScore"),
             "source_score": ranking.get("sourceScore"),
             "source_metadata": source_metadata,
+            "prediction_id": prediction.prediction_id,
+            "prediction_cache": {
+                "status": prediction.freshness.cache_status,
+                "key": prediction.freshness.cache_key,
+                "ageSeconds": prediction.freshness.cache_age_seconds,
+                "featureVersion": prediction.freshness.feature_version,
+            },
             "reason": reason,
             "group_results": group_results,
             "entry_range": (analysis or {}).get("entryRange"),

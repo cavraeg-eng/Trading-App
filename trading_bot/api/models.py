@@ -157,10 +157,22 @@ class PredictionFreshnessMetadata(BaseModel):
     source_name: Optional[str] = None
     source_type: Optional[str] = None
     price_source: Optional[str] = None
+    cache_status: Optional[str] = None
+    cache_key: Optional[str] = None
+    cache_age_seconds: Optional[float] = None
+    feature_version: Optional[str] = None
+    generated_at: Optional[datetime] = None
     is_fallback: bool = False
     freshness_seconds: Optional[float] = None
+    bar_age_seconds: Optional[float] = None
+    base_bar_age_seconds: Optional[float] = None
+    quote_age_seconds: Optional[float] = None
     last_bar_timestamp: Optional[datetime] = None
+    base_last_bar_timestamp: Optional[datetime] = None
     market_status: Optional[str] = None
+    market_hours_status: Optional[str] = None
+    market_session: Optional[str] = None
+    data_delay_reason: Optional[str] = None
     quality_flags: List[str] = []
     evaluated_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
