@@ -11,6 +11,7 @@ from trading_bot.api.models import (
     PredictionNoTradeReason,
     PredictionPriceZone,
     PredictionRationale,
+    PredictionRationaleCategory,
     PredictionRationaleFactor,
     PredictionRationaleItem,
     PredictionRationaleStance,
@@ -42,7 +43,7 @@ def _base_response(recommendation: PredictionRecommendation) -> dict:
         confidence_label=PredictionConfidenceBand.HIGH.value,
         primary_reasons=[
             PredictionRationaleFactor(
-                category="trend",
+                category=PredictionRationaleCategory.TREND,
                 stance=PredictionRationaleStance.SUPPORTIVE,
                 strength=PredictionRationaleStrength.STRONG,
                 message="Trend supports the setup.",
@@ -55,7 +56,7 @@ def _base_response(recommendation: PredictionRecommendation) -> dict:
             confidence_label=PredictionConfidenceBand.LOW.value,
             blockers=[
                 PredictionRationaleFactor(
-                    category="confidence",
+                    category=PredictionRationaleCategory.CONFIDENCE,
                     stance=PredictionRationaleStance.BLOCKING,
                     strength=PredictionRationaleStrength.MEDIUM,
                     message="Confidence is too low for a trade.",
@@ -167,6 +168,7 @@ def test_contract_endpoint_documents_consumers():
     assert "scanner" in payload["compatibility"]
     assert "freshness" in payload["requiredForEveryResponse"]
     assert "entry" in payload["requiredForBuySell"]
+    assert "spread" in payload["rationaleCategories"]
 
 
 def test_hold_prediction_tolerates_missing_trade_levels(monkeypatch):
@@ -274,6 +276,9 @@ def test_actionable_predictions_include_structured_rationale(monkeypatch, signal
     assert response.rationale.primary_reasons
     assert response.rationale.next_conditions
     assert response.rationale.blockers == []
+    assert PredictionRationaleCategory.SPREAD in {
+        factor.category for factor in response.rationale.primary_reasons
+    }
 
 
 def test_no_trade_prediction_explains_blockers_and_next_conditions(monkeypatch):
@@ -317,3 +322,55 @@ def test_no_trade_prediction_explains_blockers_and_next_conditions(monkeypatch):
     assert isinstance(response.rationale, PredictionRationale)
     assert response.rationale.blockers
     assert response.rationale.next_conditions
+
+
+def test_structured_rationale_uses_contract_categories_and_clean_summary(monkeypatch):
+    monkeypatch.setattr(
+        predictions,
+        "analyze_symbol",
+        lambda symbol, timeframe, trade_style="swing": {
+            "currentPrice": 1.1,
+            "signal": "buy",
+            "confidence": 80,
+            "reason": "Trend alignment is clean.",
+            "entryRange": {"min": 1.1, "max": 1.101},
+            "stopLoss": 1.095,
+            "takeProfit1": 1.105,
+            "takeProfit2": 1.11,
+            "takeProfit3": 1.115,
+            "riskReward": 2.0,
+            "indicators": [
+                {"name": f"Custom{i}", "value": str(i), "signal": "bullish"}
+                for i in range(7)
+            ],
+            "anchorModel": {"support": 1.09, "resistance": 1.12, "structureConflict": False},
+            "higherTimeframeBias": {"direction": "bullish", "strength": 0.7},
+        },
+    )
+    monkeypatch.setattr(
+        predictions,
+        "get_ohlcv_with_metadata",
+        lambda symbol, timeframe, trade_style="swing": (
+            None,
+            {
+                "sourceName": "test",
+                "sourceType": "fixture",
+                "priceSource": "fixture",
+                "isFallback": False,
+                "freshnessSeconds": 1,
+                "qualityFlags": [],
+                "marketStatus": "open",
+            },
+        ),
+    )
+
+    response = predictions.build_prediction_response(_request())
+
+    assert response.rationale.summary == "Long setup: Trend alignment is clean."
+    assert PredictionRationaleCategory.SPREAD in {
+        factor.category for factor in response.rationale.primary_reasons
+    }
+    assert all(
+        isinstance(factor.category, PredictionRationaleCategory)
+        for factor in response.rationale.primary_reasons
+    )

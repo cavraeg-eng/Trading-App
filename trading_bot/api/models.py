@@ -102,6 +102,19 @@ class PredictionRationaleStrength(str, Enum):
     WEAK = "weak"
 
 
+class PredictionRationaleCategory(str, Enum):
+    """Machine-readable categories for rationale factors."""
+    TREND = "trend"
+    MOMENTUM = "momentum"
+    VOLATILITY = "volatility"
+    SUPPORT_RESISTANCE = "support_resistance"
+    SPREAD = "spread"
+    ACCOUNT_RISK = "account_risk"
+    DATA_QUALITY = "data_quality"
+    CONFIDENCE = "confidence"
+    VALIDATION = "validation"
+
+
 class PredictionBrokerContext(BaseModel):
     """Optional broker/account context for risk-aware prediction requests."""
     broker_id: Optional[str] = None
@@ -163,7 +176,7 @@ class PredictionRationaleItem(BaseModel):
 
 class PredictionRationaleFactor(BaseModel):
     """UI-renderable evidence, conflict, or blocker behind a prediction."""
-    category: str
+    category: PredictionRationaleCategory
     stance: PredictionRationaleStance
     strength: PredictionRationaleStrength = PredictionRationaleStrength.MEDIUM
     message: str
@@ -286,7 +299,7 @@ class PredictionResponse(BaseModel):
             if not factors:
                 summary = message
             factors.append(PredictionRationaleFactor(
-                category=str(data.get("category") or "summary"),
+                category=PredictionRationaleCategory.VALIDATION,
                 stance=PredictionRationaleStance.SUPPORTIVE,
                 strength=PredictionRationaleStrength.MEDIUM,
                 message=message,

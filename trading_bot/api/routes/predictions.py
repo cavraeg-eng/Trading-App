@@ -15,6 +15,7 @@ from trading_bot.api.models import (
     PredictionNoTradeReason,
     PredictionPriceZone,
     PredictionRationale,
+    PredictionRationaleCategory,
     PredictionRationaleFactor,
     PredictionRationaleStance,
     PredictionRationaleStrength,
@@ -121,17 +122,17 @@ def _confidence_label(confidence: float) -> str:
     return confidence_band_for_score(confidence).value
 
 
-def _indicator_category(name: str) -> str:
+def _indicator_category(name: str) -> PredictionRationaleCategory:
     normalized = name.lower()
     if "ema" in normalized:
-        return "trend"
+        return PredictionRationaleCategory.TREND
     if "rsi" in normalized or "macd" in normalized:
-        return "momentum"
+        return PredictionRationaleCategory.MOMENTUM
     if "bb" in normalized or "bollinger" in normalized:
-        return "support_resistance"
+        return PredictionRationaleCategory.SUPPORT_RESISTANCE
     if "volume" in normalized:
-        return "volatility"
-    return "technical"
+        return PredictionRationaleCategory.VOLATILITY
+    return PredictionRationaleCategory.MOMENTUM
 
 
 def _factor_strength(indicator: dict[str, Any]) -> PredictionRationaleStrength:
@@ -146,7 +147,7 @@ def _factor_strength(indicator: dict[str, Any]) -> PredictionRationaleStrength:
 
 def _factor(
     *,
-    category: str,
+    category: PredictionRationaleCategory,
     stance: PredictionRationaleStance,
     message: str,
     strength: PredictionRationaleStrength = PredictionRationaleStrength.MEDIUM,
@@ -202,7 +203,7 @@ def _no_trade_blocker(
     if reason == PredictionNoTradeReason.STALE_DATA:
         return (
             _factor(
-                category="data_quality",
+                category=PredictionRationaleCategory.DATA_QUALITY,
                 stance=PredictionRationaleStance.BLOCKING,
                 strength=PredictionRationaleStrength.STRONG,
                 message="Market data is stale, so the setup is not safe to action.",
@@ -212,7 +213,7 @@ def _no_trade_blocker(
     if reason == PredictionNoTradeReason.INSUFFICIENT_DATA:
         return (
             _factor(
-                category="data_quality",
+                category=PredictionRationaleCategory.DATA_QUALITY,
                 stance=PredictionRationaleStance.BLOCKING,
                 strength=PredictionRationaleStrength.STRONG,
                 message="There is not enough market data to validate a trade setup.",
@@ -222,7 +223,7 @@ def _no_trade_blocker(
     if reason == PredictionNoTradeReason.CONFLICTING_SIGNALS:
         return (
             _factor(
-                category="momentum",
+                category=PredictionRationaleCategory.MOMENTUM,
                 stance=PredictionRationaleStance.BLOCKING,
                 strength=PredictionRationaleStrength.MEDIUM,
                 message="Directional signals are mixed, so there is no clean trade bias.",
@@ -232,7 +233,7 @@ def _no_trade_blocker(
     if reason == PredictionNoTradeReason.REWARD_RISK_COMPRESSED:
         return (
             _factor(
-                category="support_resistance",
+                category=PredictionRationaleCategory.SUPPORT_RESISTANCE,
                 stance=PredictionRationaleStance.BLOCKING,
                 strength=PredictionRationaleStrength.MEDIUM,
                 message="Nearby structure compresses reward-to-risk below the required threshold.",
@@ -242,7 +243,7 @@ def _no_trade_blocker(
     if reason == PredictionNoTradeReason.RISK_LIMITS:
         return (
             _factor(
-                category="account_risk",
+                category=PredictionRationaleCategory.ACCOUNT_RISK,
                 stance=PredictionRationaleStance.BLOCKING,
                 strength=PredictionRationaleStrength.STRONG,
                 message="Account risk limits prevent opening a new trade.",
@@ -252,7 +253,7 @@ def _no_trade_blocker(
     if reason == PredictionNoTradeReason.UNSUPPORTED_ASSET:
         return (
             _factor(
-                category="validation",
+                category=PredictionRationaleCategory.VALIDATION,
                 stance=PredictionRationaleStance.BLOCKING,
                 strength=PredictionRationaleStrength.STRONG,
                 message="This symbol is not supported by the prediction contract.",
@@ -261,7 +262,7 @@ def _no_trade_blocker(
         )
     return (
         _factor(
-            category="confidence",
+            category=PredictionRationaleCategory.CONFIDENCE,
             stance=PredictionRationaleStance.BLOCKING,
             strength=PredictionRationaleStrength.MEDIUM,
             message="Confidence is too low for a disciplined trade decision.",
@@ -304,7 +305,7 @@ def _structured_rationale(
     anchor = analysis.get("anchorModel") or {}
     if anchor.get("structureConflict"):
         conflicts.append(_factor(
-            category="support_resistance",
+            category=PredictionRationaleCategory.SUPPORT_RESISTANCE,
             stance=PredictionRationaleStance.CONFLICTING,
             strength=PredictionRationaleStrength.MEDIUM,
             message="Nearby support or resistance limits clean target runway.",
@@ -323,7 +324,7 @@ def _structured_rationale(
             else PredictionRationaleStance.WEAK
         )
         factor = _factor(
-            category="trend",
+            category=PredictionRationaleCategory.TREND,
             stance=stance,
             strength=PredictionRationaleStrength.MEDIUM,
             message=f"Higher-timeframe context is {direction}.",
@@ -337,14 +338,14 @@ def _structured_rationale(
 
     if any(warning.code == PredictionWarningCode.STALE_DATA for warning in warnings):
         conflicts.append(_factor(
-            category="data_quality",
+            category=PredictionRationaleCategory.DATA_QUALITY,
             stance=PredictionRationaleStance.CONFLICTING,
             strength=PredictionRationaleStrength.STRONG,
             message="Input data may be stale and should be refreshed before action.",
         ))
     if any(warning.code == PredictionWarningCode.FALLBACK_DATA for warning in warnings):
         conflicts.append(_factor(
-            category="data_quality",
+            category=PredictionRationaleCategory.DATA_QUALITY,
             stance=PredictionRationaleStance.CONFLICTING,
             strength=PredictionRationaleStrength.MEDIUM,
             message="A fallback data source reduced evidence quality.",
@@ -353,7 +354,7 @@ def _structured_rationale(
     broker_context = request.broker_context
     if broker_context and broker_context.max_risk_percent is not None:
         primary_reasons.append(_factor(
-            category="account_risk",
+            category=PredictionRationaleCategory.ACCOUNT_RISK,
             stance=PredictionRationaleStance.NEUTRAL,
             strength=PredictionRationaleStrength.MEDIUM,
             message=f"Account risk cap is {broker_context.max_risk_percent:g}% for this request.",
@@ -366,7 +367,7 @@ def _structured_rationale(
 
     if not primary_reasons and recommendation != PredictionRecommendation.NO_TRADE:
         primary_reasons.append(_factor(
-            category="summary",
+            category=PredictionRationaleCategory.CONFIDENCE,
             stance=PredictionRationaleStance.WEAK if recommendation == PredictionRecommendation.HOLD else PredictionRationaleStance.SUPPORTIVE,
             strength=PredictionRationaleStrength.WEAK,
             message=str(analysis.get("reason") or "The system generated a cautious prediction summary."),
@@ -374,7 +375,7 @@ def _structured_rationale(
 
     if recommendation in {PredictionRecommendation.BUY, PredictionRecommendation.SELL}:
         primary_reasons.append(_factor(
-            category="spread",
+            category=PredictionRationaleCategory.SPREAD,
             stance=PredictionRationaleStance.NEUTRAL,
             strength=PredictionRationaleStrength.MEDIUM,
             message="Execution quality should be checked before placing the trade.",
@@ -392,7 +393,7 @@ def _structured_rationale(
     elif not next_conditions:
         next_conditions.append("Wait for clearer evidence before acting.")
 
-    base_summary = str(analysis.get("reason") or "Prediction generated.")
+    base_summary = str(analysis.get("reason") or "Prediction generated.").rstrip(".")
     if recommendation == PredictionRecommendation.NO_TRADE:
         summary = f"No trade: {base_summary}."
     elif recommendation == PredictionRecommendation.HOLD:
@@ -404,7 +405,7 @@ def _structured_rationale(
     return PredictionRationale(
         summary=summary,
         confidence_label=_confidence_label(confidence),
-        primary_reasons=primary_reasons[:6],
+        primary_reasons=primary_reasons[:8],
         conflicts=conflicts[:5],
         blockers=blockers,
         next_conditions=next_conditions[:5],
@@ -573,6 +574,7 @@ async def get_prediction_contract() -> dict:
         "recommendations": [item.value for item in PredictionRecommendation],
         "noTradeReasons": [item.value for item in PredictionNoTradeReason],
         "confidenceBands": [item.value for item in PredictionConfidenceBand],
+        "rationaleCategories": [item.value for item in PredictionRationaleCategory],
         "rationaleStances": [item.value for item in PredictionRationaleStance],
         "rationaleStrengths": [item.value for item in PredictionRationaleStrength],
         "warningCodes": [item.value for item in PredictionWarningCode],
