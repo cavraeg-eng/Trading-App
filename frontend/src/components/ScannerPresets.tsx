@@ -22,9 +22,13 @@ interface ScannerPresetsProps {
   loading: boolean
   loadingSaved: boolean
   activeScannerKey?: string
+  riskFilter?: 'all' | 'low' | 'medium' | 'high'
+  styleFilter?: 'all' | 'swing' | 'scalp'
   onApplyPreset: (preset: ScannerPreset) => void
   onApplySaved: (scanner: SavedScanner) => void
   onDeleteSaved: (scannerId: number) => void
+  onRiskFilterChange?: (filter: 'all' | 'low' | 'medium' | 'high') => void
+  onStyleFilterChange?: (filter: 'all' | 'swing' | 'scalp') => void
 }
 
 const iconMap: Record<string, React.ElementType> = {
@@ -90,15 +94,25 @@ function accentClasses(accent?: string) {
   return styles[accent || ''] || styles.sky
 }
 
+function riskDotColor(risk?: string) {
+  if (risk === 'low') return 'bg-emerald-400'
+  if (risk === 'high') return 'bg-rose-400'
+  return 'bg-amber-400'
+}
+
 export default function ScannerPresets({
   presets,
   savedScanners,
   loading,
   loadingSaved,
   activeScannerKey,
+  riskFilter = 'all',
+  styleFilter = 'all',
   onApplyPreset,
   onApplySaved,
   onDeleteSaved,
+  onRiskFilterChange,
+  onStyleFilterChange,
 }: ScannerPresetsProps) {
   return (
     <div className="space-y-5">
@@ -120,6 +134,49 @@ export default function ScannerPresets({
               <span className="rounded-full border border-trading-border bg-trading-bg px-2.5 py-1">{savedScanners.length} saved</span>
             </div>
           </div>
+
+          {/* Filter bar */}
+          {onRiskFilterChange || onStyleFilterChange ? (
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              {onRiskFilterChange ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wider text-trading-muted">Risk</span>
+                  <div className="flex rounded-md border border-trading-border bg-trading-card p-0.5">
+                    {(['all', 'low', 'medium', 'high'] as const).map((r) => (
+                      <button
+                        key={r}
+                        onClick={() => onRiskFilterChange(r)}
+                        className={`rounded px-2 py-0.5 text-[10px] font-medium capitalize transition-colors ${
+                          riskFilter === r ? 'bg-trading-accent text-white' : 'text-trading-muted hover:text-trading-text'
+                        }`}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {onStyleFilterChange ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wider text-trading-muted">Style</span>
+                  <div className="flex rounded-md border border-trading-border bg-trading-card p-0.5">
+                    {(['all', 'swing', 'scalp'] as const).map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => onStyleFilterChange(s)}
+                        className={`rounded px-2 py-0.5 text-[10px] font-medium capitalize transition-colors ${
+                          styleFilter === s ? 'bg-trading-accent text-white' : 'text-trading-muted hover:text-trading-text'
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           {loading ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {[...Array(6)].map((_, index) => (
@@ -167,9 +224,15 @@ export default function ScannerPresets({
                           <p className="text-[11px] uppercase tracking-[0.18em] text-trading-muted">{preset.category || 'Strategy bot'}</p>
                         </div>
                       </div>
-                      <span className="rounded-full border border-trading-border bg-trading-card px-2 py-0.5 text-[10px] font-medium text-trading-muted">
-                        {preset.popularity || 'Ready'}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="flex items-center gap-1 rounded-full border border-trading-border bg-trading-card px-2 py-0.5 text-[10px] font-medium text-trading-muted">
+                          <span className={`inline-block h-1.5 w-1.5 rounded-full ${riskDotColor(preset.risk)}`} />
+                          {preset.risk || 'medium'}
+                        </span>
+                        <span className="rounded-full border border-trading-border bg-trading-card px-2 py-0.5 text-[10px] font-medium text-trading-muted">
+                          {preset.popularity || 'Ready'}
+                        </span>
+                      </div>
                     </div>
                     <p className="mt-3 min-h-[2.5rem] text-xs leading-5 text-trading-muted">{preset.description}</p>
                     <div className="mt-3 grid grid-cols-3 gap-2">

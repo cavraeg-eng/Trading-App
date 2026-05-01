@@ -107,6 +107,16 @@ export interface ScanResult {
   source_score?: number;
   source_metadata?: SourceMetadata;
   reason?: string;
+  entry_range?: { min: number; max: number };
+  stop_loss?: number;
+  take_profit1?: number;
+  take_profit2?: number;
+  take_profit3?: number;
+  current_price?: number;
+  risk_gate?: 'low' | 'medium' | 'high';
+  risk_context?: { volatility_regime: string; market_status: string };
+  atr?: number;
+  group_results?: Array<{ name: string; logic: string; passed: boolean; score: number; matched_count: number; total_count: number }>;
 }
 
 export interface ScannerPreset {
