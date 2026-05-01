@@ -182,6 +182,7 @@ class PredictionChartOverlay(BaseModel):
     stop_loss: Optional[float] = None
     take_profit_targets: List[PredictionTarget] = []
     invalidation_level: Optional[float] = None
+    expires_at: Optional[datetime] = None
     support: Optional[float] = None
     resistance: Optional[float] = None
     annotations: List[Dict[str, Any]] = []
@@ -221,6 +222,7 @@ class PredictionResponse(BaseModel):
     take_profit_targets: List[PredictionTarget] = []
     invalidation_level: Optional[float] = None
     risk_reward: Optional[float] = None
+    expires_at: Optional[datetime] = None
     rationale: List[PredictionRationaleItem]
     warnings: List[PredictionWarning] = []
     freshness: PredictionFreshnessMetadata = Field(default_factory=PredictionFreshnessMetadata)
@@ -242,11 +244,18 @@ class PredictionResponse(BaseModel):
                 raise ValueError("no_trade responses require no_trade_reason")
             if self.entry is not None or self.stop_loss is not None or self.take_profit_targets:
                 raise ValueError("no_trade responses must not include actionable trade levels")
+        elif self.recommendation == PredictionRecommendation.HOLD:
+            if self.entry is not None or self.stop_loss is not None or self.take_profit_targets:
+                raise ValueError("hold responses must not include actionable trade levels")
         elif self.recommendation in {PredictionRecommendation.BUY, PredictionRecommendation.SELL}:
             if self.entry is None or self.stop_loss is None or not self.take_profit_targets:
                 raise ValueError("buy/sell responses require entry, stop_loss, and take_profit_targets")
             if self.risk_reward is None:
                 raise ValueError("buy/sell responses require risk_reward")
+            if self.invalidation_level is None:
+                raise ValueError("buy/sell responses require invalidation_level")
+            if self.expires_at is None:
+                raise ValueError("buy/sell responses require expires_at")
         return self
 
 
