@@ -162,7 +162,7 @@ def _append_signal_gates(
         ))
 
     atr_pct = (atr / current_price) * 100.0 if current_price > 0 and atr > 0 else 0.0
-    if atr_pct > config.volatility_spike_atr_pct:
+    if signal in {"buy", "sell"} and atr_pct > config.volatility_spike_atr_pct:
         gates.append(NoTradeGate(
             code=PredictionNoTradeReason.HIGH_VOLATILITY_SPIKE,
             message="ATR indicates a volatility spike; wait for conditions to normalize.",

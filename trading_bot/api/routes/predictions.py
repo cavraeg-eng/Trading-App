@@ -604,7 +604,7 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
         invalidation = None
         risk_reward = None
 
-    if incomplete_actionable_levels:
+    if incomplete_actionable_levels and not quality.gates:
         recommendation = PredictionRecommendation.NO_TRADE
         no_trade_reason = PredictionNoTradeReason.INSUFFICIENT_DATA
         no_trade_reasons = [PredictionNoTradeDetail(

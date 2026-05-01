@@ -326,9 +326,9 @@ function AITradingHub({
   const isNoTrade = signalDetails.signal === 'hold' && Boolean(signalDetails.noTradeReasons?.length)
 
   const hasValidData =
-    isNoTrade || signalDetails.stopLoss !== 0 &&
+    isNoTrade || (signalDetails.stopLoss !== 0 &&
     signalDetails.stopLoss !== signalDetails.entryRange.min &&
-    signalDetails.entryRange.min !== signalDetails.entryRange.max
+    signalDetails.entryRange.min !== signalDetails.entryRange.max)
 
   /* position sizing */
   const riskAmount = accountBalance * (riskPct / 100)

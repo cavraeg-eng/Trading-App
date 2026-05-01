@@ -228,7 +228,7 @@ def test_incomplete_buy_levels_downgrade_to_no_trade_without_targets(monkeypatch
     response = predictions.build_prediction_response(_request())
 
     assert response.recommendation == PredictionRecommendation.NO_TRADE
-    assert response.no_trade_reason == PredictionNoTradeReason.INSUFFICIENT_DATA
+    assert response.no_trade_reason == PredictionNoTradeReason.REWARD_RISK_COMPRESSED
     assert response.take_profit_targets == []
     assert response.chart.take_profit_targets == []
     assert response.no_trade_reasons
