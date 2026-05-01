@@ -38,7 +38,7 @@ Metrics reset when the API process restarts.
 - `scanner.symbol_scanned` / `scanner.symbol_failed`: used to calculate `failedSymbolRate`.
 - `prediction.success` / `prediction.failure`: used to calculate `predictionSuccessRate`.
 - `scanner.success` / `scanner.failure`: used to calculate `scannerSuccessRate`.
-- `no_trade_reason`: labeled count of why predictions resolved to hold/no-trade, including `mixed_indicators`, `risk_reward_compressed`, `data_quality`, `low_confidence`, `structure_conflict`, and `other`.
+- `no_trade_reason`: labeled count of why `/api/ai/score/{symbol}` predictions resolved to hold/no-trade, including `mixed_indicators`, `risk_reward_compressed`, `data_quality`, `low_confidence`, `structure_conflict`, and `other`.
 - `external_api.error` and `external_api.timeout`: labeled by source for external provider failures.
 
 ## Release validation

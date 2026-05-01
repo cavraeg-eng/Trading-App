@@ -762,7 +762,12 @@ def fetch_data_yf(symbol: str, timeframe: str) -> Optional[pd.DataFrame]:
     return get_ohlcv(symbol, timeframe, trade_style="swing")
 
 
-def analyze_symbol(symbol: str, timeframe: str, trade_style: str = "swing") -> Optional[dict]:
+def analyze_symbol(
+    symbol: str,
+    timeframe: str,
+    trade_style: str = "swing",
+    record_no_trade_reason: bool = False,
+) -> Optional[dict]:
     """Perform technical analysis on a symbol."""
     df, metadata = get_shared_ohlcv_with_metadata(symbol, timeframe, trade_style=trade_style)
     if df is None or len(df) < 30:
@@ -1144,7 +1149,7 @@ def analyze_symbol(symbol: str, timeframe: str, trade_style: str = "swing") -> O
             sentiment_score=_sentiment_score,
             volume_ratio=volume_ratio,
         )
-    if signal == "hold":
+    if signal == "hold" and record_no_trade_reason:
         bot_metrics.increment_counter(
             "no_trade_reason",
             label=classify_no_trade_reason(reason),

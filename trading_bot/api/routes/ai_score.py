@@ -8,7 +8,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from trading_bot.api.routes.market import analyze_symbol, compute_ai_score
+from trading_bot.api.routes.market import analyze_symbol
 from trading_bot.data.market_data_service import get_ohlcv_with_metadata
 from trading_bot.config import get_logger
 from trading_bot.monitoring.bot_metrics import bot_metrics
@@ -80,40 +80,20 @@ async def get_ai_score(
         "trade_style": trade_style,
     }
     try:
-        analysis = analyze_symbol(symbol, timeframe, trade_style=trade_style)
+        analysis = analyze_symbol(
+            symbol,
+            timeframe,
+            trade_style=trade_style,
+            record_no_trade_reason=True,
+        )
         if analysis is None:
             bot_metrics.increment_counter("prediction.failure", request_id=request_id, context=context)
             raise HTTPException(status_code=503, detail=f"AI score unavailable for {symbol}")
 
         # Extract values needed for score computation
-        signal = analysis["signal"]
-        confidence = analysis["confidence"]
-        indicators = analysis.get("indicators", [])
-        regime = analysis.get("marketRegime", "ranging")
-        patterns = analysis.get("patterns", [])
-        volume_ratio_val = None
-        # volume_ratio is already computed inside analyze_symbol; recompute from OHLCV
-        try:
-            from trading_bot.api.routes.market import get_shared_ohlcv
-            df = get_shared_ohlcv(symbol, timeframe, trade_style=trade_style)
-            if df is not None and len(df) >= 20:
-                current_vol = float(df["volume"].iloc[-1])
-                avg_vol = float(df["volume"].rolling(window=20).mean().iloc[-1])
-                if avg_vol > 0:
-                    volume_ratio_val = current_vol / avg_vol
-        except Exception:
-            pass
-
-        sentiment_val = _get_sentiment_score(symbol)
         metadata_timeframe = "1m" if trade_style == "scalp" and timeframe not in ("1m", "5m") else timeframe
         _, metadata = get_ohlcv_with_metadata(symbol, metadata_timeframe, trade_style=trade_style)
-
-        with bot_metrics.timer("prediction.scoring", request_id=request_id, context=context):
-            score_data = compute_ai_score(
-                signal, confidence, indicators, regime, patterns,
-                sentiment_score=sentiment_val,
-                volume_ratio=volume_ratio_val,
-            )
+        score_data = analysis.get("aiScore") or {"value": 0, "label": "Cautious", "factors": {}}
 
         change = _compute_change(score_data["value"], symbol)
         bot_metrics.increment_counter("prediction.success", request_id=request_id, context=context)
