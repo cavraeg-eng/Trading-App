@@ -1,10 +1,16 @@
 """AI prediction and suggestion contract endpoints."""
 
+import copy
+import threading
+from collections import OrderedDict
 from datetime import datetime, timezone
+from time import perf_counter
 from typing import Any, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel, Field as PydanticField
 
 from trading_bot.api.models import (
     PredictionAccountContextStatus,
@@ -43,6 +49,97 @@ from trading_bot.services.trade_suggestions import generate_trade_suggestion
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/predictions", tags=["predictions"])
+
+PREDICTION_FEATURE_VERSION = "prediction_features_v1"
+PREDICTION_CACHE_MAX_ENTRIES = 128
+PREDICTION_CACHE_TTL_SECONDS = 60.0
+PREDICTION_WARMUP_MAX_SYMBOLS = 25
+PREDICTION_WARMUP_MAX_TIMEFRAMES = 6
+PREDICTION_WARMUP_MAX_COMBINATIONS = 50
+
+_prediction_cache: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
+_prediction_cache_lock = threading.RLock()
+_UNSET = object()
+
+
+class PredictionWarmupRequest(BaseModel):
+    symbols: list[str] = PydanticField(min_length=1, max_length=PREDICTION_WARMUP_MAX_SYMBOLS)
+    timeframes: list[str] = PydanticField(
+        default_factory=lambda: ["1h"],
+        min_length=1,
+        max_length=PREDICTION_WARMUP_MAX_TIMEFRAMES,
+    )
+    strategy_mode: PredictionStrategyMode = PredictionStrategyMode.SWING
+
+
+def _utc_now() -> datetime:
+    return datetime.now(tz=timezone.utc)
+
+
+def _source_key(request: PredictionRequest) -> str:
+    broker_context = request.broker_context
+    if broker_context and broker_context.broker_id:
+        return broker_context.broker_id
+    return "default"
+
+
+def _cache_base_key(request: PredictionRequest, trade_style: str) -> str:
+    return ":".join([
+        "prediction",
+        PREDICTION_FEATURE_VERSION,
+        request.symbol.upper(),
+        request.timeframe,
+        trade_style,
+        _source_key(request),
+    ])
+
+
+def _cache_key(request: PredictionRequest, metadata: dict[str, Any], trade_style: str) -> str:
+    latest_candle = (
+        metadata.get("lastBarTimestamp")
+        or metadata.get("baseLastBarTimestamp")
+        or "unknown-candle"
+    )
+    source = metadata.get("sourceName") or metadata.get("sourceType") or "unknown-source"
+    return f"{_cache_base_key(request, trade_style)}:{source}:{latest_candle}"
+
+
+def _prediction_from_cache(key: str) -> Optional[PredictionResponse]:
+    now = perf_counter()
+    with _prediction_cache_lock:
+        cached = _prediction_cache.get(key)
+        if not cached:
+            return None
+        age = now - cached["cached_at"]
+        if age > PREDICTION_CACHE_TTL_SECONDS:
+            _prediction_cache.pop(key, None)
+            return None
+        _prediction_cache.move_to_end(key)
+        response = copy.deepcopy(cached["response"])
+
+    response.prediction_id = f"pred_{uuid4().hex}"
+    response.generated_at = _utc_now()
+    response.freshness.cache_status = "hit"
+    response.freshness.cache_key = key
+    response.freshness.cache_age_seconds = round(age, 3)
+    response.freshness.evaluated_at = _utc_now()
+    response.latency.total_latency_ms = 0.0
+    return response
+
+
+def _store_prediction_cache(key: str, response: PredictionResponse) -> None:
+    stored = copy.deepcopy(response)
+    stored.freshness.cache_status = "miss"
+    stored.freshness.cache_key = key
+    stored.freshness.cache_age_seconds = 0.0
+    with _prediction_cache_lock:
+        _prediction_cache[key] = {
+            "response": stored,
+            "cached_at": perf_counter(),
+        }
+        _prediction_cache.move_to_end(key)
+        while len(_prediction_cache) > PREDICTION_CACHE_MAX_ENTRIES:
+            _prediction_cache.popitem(last=False)
 
 
 def _asset_class_for_symbol(symbol: str) -> PredictionAssetClass:
@@ -177,14 +274,37 @@ def _freshness_metadata(metadata: dict[str, Any]) -> PredictionFreshnessMetadata
     else:
         last_bar_timestamp = None
 
+    base_last_bar = metadata.get("baseLastBarTimestamp")
+    if isinstance(base_last_bar, (int, float)):
+        base_last_bar_timestamp = datetime.fromtimestamp(float(base_last_bar), tz=timezone.utc)
+    elif isinstance(base_last_bar, str):
+        try:
+            base_last_bar_timestamp = datetime.fromisoformat(base_last_bar.replace("Z", "+00:00"))
+        except ValueError:
+            base_last_bar_timestamp = None
+    else:
+        base_last_bar_timestamp = None
+
     return PredictionFreshnessMetadata(
         source_name=metadata.get("sourceName"),
         source_type=metadata.get("sourceType"),
         price_source=metadata.get("priceSource"),
+        cache_status=metadata.get("cacheStatus"),
+        cache_key=metadata.get("cacheKey"),
+        cache_age_seconds=metadata.get("cacheAgeSeconds"),
+        feature_version=metadata.get("featureVersion"),
+        generated_at=_utc_now(),
         is_fallback=bool(metadata.get("isFallback", False)),
         freshness_seconds=metadata.get("freshnessSeconds"),
+        bar_age_seconds=metadata.get("barAgeSeconds"),
+        base_bar_age_seconds=metadata.get("baseBarAgeSeconds"),
+        quote_age_seconds=metadata.get("quoteAgeSeconds"),
         last_bar_timestamp=last_bar_timestamp,
+        base_last_bar_timestamp=base_last_bar_timestamp,
         market_status=metadata.get("marketStatus"),
+        market_hours_status=metadata.get("marketHoursStatus"),
+        market_session=metadata.get("marketSession"),
+        data_delay_reason=metadata.get("dataDelayReason"),
         quality_flags=list(metadata.get("qualityFlags") or []),
     )
 
@@ -826,17 +946,43 @@ def _structured_rationale(
     )
 
 
-def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
+def build_prediction_response(
+    request: PredictionRequest,
+    analysis_override: Any = _UNSET,
+    metadata_override: Optional[dict[str, Any]] = None,
+) -> PredictionResponse:
     """Build a contract-compliant prediction response from current analysis."""
     if request.symbol not in ALLOWED_SYMBOLS and map_symbol_to_yf(request.symbol) not in ALLOWED_SYMBOLS:
         return _unsupported_asset_response(request)
 
-    started_at = datetime.now(tz=timezone.utc)
+    started_at = _utc_now()
+    data_started = perf_counter()
     account_context_status = _context_status(request, started_at)
     trade_style = _trade_style_for_strategy_mode(request.strategy_mode)
-    analysis = analyze_symbol(request.symbol, request.timeframe, trade_style=trade_style)
-    _, metadata = get_ohlcv_with_metadata(request.symbol, request.timeframe, trade_style=trade_style)
-    elapsed_ms = (datetime.now(tz=timezone.utc) - started_at).total_seconds() * 1000
+    if metadata_override is None:
+        _, metadata = get_ohlcv_with_metadata(request.symbol, request.timeframe, trade_style=trade_style)
+    else:
+        metadata = dict(metadata_override)
+    data_fetch_ms = (perf_counter() - data_started) * 1000
+    metadata["featureVersion"] = PREDICTION_FEATURE_VERSION
+    cache_key = _cache_key(request, metadata, trade_style)
+    cached_response = _prediction_from_cache(cache_key)
+    if cached_response is not None:
+        cached_response.latency.data_fetch_ms = round(data_fetch_ms, 2)
+        cached_response.latency.total_latency_ms = round((perf_counter() - data_started) * 1000, 2)
+        return cached_response
+
+    feature_started = perf_counter()
+    analysis = (
+        analyze_symbol(request.symbol, request.timeframe, trade_style=trade_style)
+        if analysis_override is _UNSET
+        else analysis_override
+    )
+    feature_build_ms = (perf_counter() - feature_started) * 1000
+    elapsed_ms = (_utc_now() - started_at).total_seconds() * 1000
+    metadata["cacheStatus"] = "miss"
+    metadata["cacheKey"] = cache_key
+    metadata["cacheAgeSeconds"] = 0.0
 
     quality = evaluate_prediction_quality(analysis, metadata, request.broker_context)
     confidence = quality.confidence
@@ -940,7 +1086,7 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
         action_label="Review setup" if recommendation in {PredictionRecommendation.BUY, PredictionRecommendation.SELL} else "Stand aside",
     )
 
-    return PredictionResponse(
+    response = PredictionResponse(
         prediction_id=f"pred_{uuid4().hex}",
         request=request,
         symbol=request.symbol,
@@ -966,10 +1112,18 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
         position_size_reason=position_size_reason,
         trade_allowed=trade_allowed,
         freshness=freshness,
-        latency=PredictionLatencyMetadata(total_latency_ms=round(elapsed_ms, 2), model_name="heuristic_analysis", model_version="1.0"),
+        latency=PredictionLatencyMetadata(
+            data_fetch_ms=round(data_fetch_ms, 2),
+            feature_build_ms=round(feature_build_ms, 2),
+            total_latency_ms=round(elapsed_ms, 2),
+            model_name="heuristic_analysis",
+            model_version="1.0",
+        ),
         chart=chart,
         suggestion_card=suggestion,
     )
+    _store_prediction_cache(cache_key, response)
+    return response
 
 
 def _unsupported_asset_response(request: PredictionRequest) -> PredictionResponse:
@@ -1013,6 +1167,24 @@ def _unsupported_asset_response(request: PredictionRequest) -> PredictionRespons
     )
 
 
+def clear_prediction_cache() -> None:
+    with _prediction_cache_lock:
+        _prediction_cache.clear()
+
+
+def get_prediction_cache_info() -> dict[str, Any]:
+    now = perf_counter()
+    with _prediction_cache_lock:
+        ages = [round(now - item["cached_at"], 3) for item in _prediction_cache.values()]
+        return {
+            "entries": len(_prediction_cache),
+            "max_entries": PREDICTION_CACHE_MAX_ENTRIES,
+            "ttl_seconds": PREDICTION_CACHE_TTL_SECONDS,
+            "oldest_entry_age_s": max(ages) if ages else None,
+            "feature_version": PREDICTION_FEATURE_VERSION,
+        }
+
+
 @router.get("/contract")
 async def get_prediction_contract() -> dict:
     """Return machine-readable enums and compatibility guidance for consumers."""
@@ -1046,6 +1218,14 @@ async def get_prediction_contract() -> dict:
         ],
         "requiredForBuySell": ["entry", "stop_loss", "take_profit_targets", "risk_reward", "invalidation_level", "expires_at"],
         "requiredForNoTrade": ["no_trade_reason", "no_trade_reasons"],
+        "freshnessMetadata": [
+            "cache_status",
+            "cache_key",
+            "cache_age_seconds",
+            "feature_version",
+            "freshness_seconds",
+            "quality_flags",
+        ],
         "rationaleShape": {
             "summary": "Trader-readable explanation text.",
             "confidence_label": "Bucketed confidence label for UI copy.",
@@ -1068,6 +1248,51 @@ async def get_prediction_contract() -> dict:
             "position": "swing",
             "automation": "swing",
         },
+    }
+
+
+@router.get("/cache")
+async def get_prediction_cache() -> dict[str, Any]:
+    return get_prediction_cache_info()
+
+
+@router.post("/warmup")
+async def warm_prediction_cache(request: PredictionWarmupRequest) -> dict[str, Any]:
+    total_requests = len(request.symbols) * len(request.timeframes)
+    if total_requests > PREDICTION_WARMUP_MAX_COMBINATIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Warmup is limited to {PREDICTION_WARMUP_MAX_COMBINATIONS} symbol/timeframe combinations.",
+        )
+
+    warmed: list[dict[str, str]] = []
+    failed: list[dict[str, str]] = []
+    for symbol in request.symbols:
+        for timeframe in request.timeframes:
+            prediction_request = PredictionRequest(
+                symbol=symbol,
+                asset_class=_asset_class_for_symbol(symbol),
+                timeframe=timeframe,
+                strategy_mode=request.strategy_mode,
+            )
+            try:
+                response = await run_in_threadpool(build_prediction_response, prediction_request)
+                warmed.append({
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "cacheStatus": response.freshness.cache_status or "unknown",
+                })
+            except Exception as exc:
+                failed.append({
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "error": str(exc),
+                })
+                logger.warning(f"Prediction warmup failed for {symbol}/{timeframe}: {exc}")
+    return {
+        "warmed": warmed,
+        "failed": failed,
+        "cache": get_prediction_cache_info(),
     }
 
 
