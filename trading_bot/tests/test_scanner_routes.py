@@ -92,6 +92,36 @@ def test_scan_rejects_invalid_timeframe():
     assert "Unsupported timeframe" in response.json()["detail"]
 
 
+def test_scan_returns_actionable_fields():
+    response = client.post(
+        "/api/scanner/scan",
+        json={
+            "name": "Actionable Test",
+            "conditions": [{"indicator": "RSI", "operator": "<", "value": 100}],
+            "logic": "AND",
+            "pairs": ["EUR/USD"],
+            "trade_style": "swing",
+            "timeframe": "1h",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert "results" in payload
+    assert "meta" in payload
+    # If a result is returned, assert new actionable fields exist
+    for result in payload["results"]:
+        assert "risk_gate" in result
+        assert result["risk_gate"] in ("low", "medium", "high")
+        assert "risk_context" in result
+        assert "volatility_regime" in result["risk_context"]
+        assert "market_status" in result["risk_context"]
+        assert "group_results" in result
+        # entry_range, stop_loss, take_profit1 may be present if analysis returned them
+        if "entry_range" in result:
+            assert "min" in result["entry_range"]
+            assert "max" in result["entry_range"]
+
+
 def test_scanner_alert_creation():
     response = client.post(
         "/api/scanner/alert",

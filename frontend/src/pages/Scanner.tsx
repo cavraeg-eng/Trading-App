@@ -151,6 +151,7 @@ export default function Scanner({
     error,
     warnings,
     presets,
+    filteredPresets,
     savedScanners,
     loadingMetadata,
     loadingSaved,
@@ -159,12 +160,16 @@ export default function Scanner({
     hasRun,
     lastRunAt,
     groups,
+    riskFilter,
+    styleFilter,
     setGroups,
     setLogic,
     setSelectedPairs,
     setScannerName,
     setTradeStyle,
     setTimeframe,
+    setRiskFilter,
+    setStyleFilter,
     applyPreset,
     loadSavedScanner,
     runScan,
@@ -505,14 +510,18 @@ export default function Scanner({
                     </div>
                   ) : (
                     <ScannerPresets
-                      presets={presets}
+                      presets={filteredPresets}
                       savedScanners={savedScanners}
                       loading={loadingMetadata}
                       loadingSaved={loadingSaved}
                       activeScannerKey={activeScannerKey}
+                      riskFilter={riskFilter}
+                      styleFilter={styleFilter}
                       onApplyPreset={handleApplyPreset}
                       onApplySaved={handleLoadSaved}
                       onDeleteSaved={handleDeleteSaved}
+                      onRiskFilterChange={setRiskFilter}
+                      onStyleFilterChange={setStyleFilter}
                     />
                   )}
                 </div>
@@ -695,7 +704,7 @@ export default function Scanner({
                         </div>
                       </div>
 
-                      {/* Row 2: Metrics pills + badges */}
+                      {/* Row 2: Metrics pills + badges + risk gate */}
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         <span className="rounded-md bg-trading-bg px-2 py-0.5 text-[10px] font-medium text-trading-text">
                           Opp: {Math.round(result.opportunity_score || 0)}%
@@ -706,6 +715,17 @@ export default function Scanner({
                         <span className="rounded-md bg-trading-bg px-2 py-0.5 text-[10px] font-medium text-trading-text">
                           Vol: {(result.indicator_values?.Volume || 0).toFixed(1)}x
                         </span>
+                        {result.risk_gate ? (
+                          <span className={`rounded-md px-2 py-0.5 text-[10px] font-medium uppercase ${
+                            result.risk_gate === 'low'
+                              ? 'bg-emerald-500/10 text-emerald-300'
+                              : result.risk_gate === 'high'
+                                ? 'bg-rose-500/10 text-rose-300'
+                                : 'bg-amber-500/10 text-amber-300'
+                          }`}>
+                            {result.risk_gate} risk
+                          </span>
+                        ) : null}
                         {result.source_metadata ? (
                           <>
                             <DataSourceBadge
@@ -724,7 +744,43 @@ export default function Scanner({
                         ) : null}
                       </div>
 
-                      {/* Row 3: Matching conditions as tags */}
+                      {/* Row 2b: Actionable trade levels */}
+                      {result.entry_range || result.stop_loss || result.take_profit1 ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          {result.entry_range ? (
+                            <span className="rounded-md border border-trading-border bg-trading-bg px-2 py-0.5 text-[10px] text-trading-text">
+                              Entry: {result.entry_range.min} – {result.entry_range.max}
+                            </span>
+                          ) : null}
+                          {result.stop_loss ? (
+                            <span className="rounded-md border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-300">
+                              SL: {result.stop_loss}
+                            </span>
+                          ) : null}
+                          {result.take_profit1 ? (
+                            <span className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-300">
+                              TP1: {result.take_profit1}
+                            </span>
+                          ) : null}
+                          {result.take_profit2 ? (
+                            <span className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-300">
+                              TP2: {result.take_profit2}
+                            </span>
+                          ) : null}
+                          {result.take_profit3 ? (
+                            <span className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-300">
+                              TP3: {result.take_profit3}
+                            </span>
+                          ) : null}
+                          {result.current_price ? (
+                            <span className="rounded-md bg-trading-bg px-2 py-0.5 text-[10px] text-trading-muted">
+                              Price: {result.current_price}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {/* Row 3: Matching conditions as tags + group results */}
                       <div className="mt-2 flex flex-wrap gap-1">
                         {result.matching_conditions.map((cond) => (
                           <span key={`${result.symbol}-${cond}`} className="rounded-md bg-trading-bg px-2 py-0.5 text-[10px] text-trading-muted">
@@ -739,6 +795,14 @@ export default function Scanner({
                             {showIndicators ? 'Hide indicators' : 'Show indicators'}
                           </button>
                         ) : null}
+                        {result.group_results && result.group_results.length > 1 ? (
+                          <button
+                            onClick={() => toggleIndicators(`${resultKey}-groups`)}
+                            className="rounded-md px-2 py-0.5 text-[10px] text-trading-accent transition-colors hover:bg-trading-accent/10"
+                          >
+                            {expandedIndicators.has(`${resultKey}-groups`) ? 'Hide groups' : 'Show groups'}
+                          </button>
+                        ) : null}
                       </div>
 
                       {/* Row 4: Expandable indicator values */}
@@ -748,6 +812,22 @@ export default function Scanner({
                             <div key={key} className="rounded-md bg-trading-bg px-2 py-1.5">
                               <div className="text-[9px] uppercase tracking-wider text-trading-muted">{key}</div>
                               <div className="text-xs font-semibold text-trading-text">{value}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {/* Row 4b: Expandable group results */}
+                      {expandedIndicators.has(`${resultKey}-groups`) && result.group_results ? (
+                        <div className="mt-2 space-y-1.5">
+                          {result.group_results.map((group) => (
+                            <div key={group.name} className="flex items-center justify-between rounded-md bg-trading-bg px-2 py-1.5">
+                              <div className="flex items-center gap-2">
+                                <span className={`h-1.5 w-1.5 rounded-full ${group.passed ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                                <span className="text-[10px] font-medium text-trading-text">{group.name}</span>
+                                <span className="text-[10px] text-trading-muted">{group.logic}</span>
+                              </div>
+                              <span className="text-[10px] text-trading-muted">{group.matched_count}/{group.total_count}</span>
                             </div>
                           ))}
                         </div>

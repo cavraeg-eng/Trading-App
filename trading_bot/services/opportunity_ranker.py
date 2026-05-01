@@ -40,6 +40,56 @@ def _score_source(metadata: Optional[Dict]) -> float:
     return max(0.0, min(1.0, score))
 
 
+def compute_risk_gate(analysis: Dict, source_metadata: Optional[Dict] = None) -> str:
+    """Compute a risk gate level based on volatility, data quality, and opportunity."""
+    atr = float(analysis.get("atr", 0))
+    current_price = float(analysis.get("currentPrice", 0))
+    opportunity_score = float(analysis.get("opportunityScore", 50))
+    regime = analysis.get("marketRegime", "ranging")
+    confidence = float(analysis.get("confidence", 50))
+
+    risk_points = 0
+
+    # Volatility risk: high ATR relative to price
+    if current_price > 0:
+        atr_pct = (atr / current_price) * 100
+        if atr_pct > 2.0:
+            risk_points += 2
+        elif atr_pct > 1.0:
+            risk_points += 1
+
+    # Opportunity risk: very low opportunity score suggests unfavorable conditions
+    if opportunity_score < 30:
+        risk_points += 2
+    elif opportunity_score < 50:
+        risk_points += 1
+
+    # Regime risk
+    if regime in ("volatile", "choppy"):
+        risk_points += 1
+    elif regime == "ranging":
+        risk_points += 0
+
+    # Data quality risk
+    if source_metadata:
+        if source_metadata.get("isFallback"):
+            risk_points += 1
+        if source_metadata.get("marketStatus") in ("stale", "delayed"):
+            risk_points += 1
+        if "stale_data" in set(source_metadata.get("qualityFlags", [])):
+            risk_points += 1
+
+    # Confidence risk: very low confidence
+    if confidence < 40:
+        risk_points += 1
+
+    if risk_points >= 4:
+        return "high"
+    if risk_points >= 2:
+        return "medium"
+    return "low"
+
+
 def rank_opportunity(analysis: Dict, source_metadata: Optional[Dict] = None) -> Dict:
     confidence = float(analysis.get("confidence", 50))
     ai_score = float((analysis.get("aiScore") or {}).get("value", 50))
@@ -68,6 +118,7 @@ def rank_opportunity(analysis: Dict, source_metadata: Optional[Dict] = None) -> 
         "sourceScore": round(source_score * 100, 1),
         "regimeScore": round(regime_score * 100, 1),
         "signalStrength": signal,
+        "riskGate": compute_risk_gate(analysis, source_metadata),
     }
 
 

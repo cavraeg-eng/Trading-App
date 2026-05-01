@@ -60,6 +60,8 @@ export function useScanner(initialCategorySymbols: string[]) {
   const [loadingMetadata, setLoadingMetadata] = useState(true)
   const [loadingSaved, setLoadingSaved] = useState(true)
   const [lastRunAt, setLastRunAt] = useState<string | null>(null)
+  const [riskFilter, setRiskFilter] = useState<'all' | 'low' | 'medium' | 'high'>('all')
+  const [styleFilter, setStyleFilter] = useState<'all' | 'swing' | 'scalp'>('all')
   const abortRef = useRef<AbortController | null>(null)
   const requestIdRef = useRef(0)
 
@@ -107,6 +109,14 @@ export function useScanner(initialCategorySymbols: string[]) {
   useEffect(() => {
     refreshSavedScanners()
   }, [refreshSavedScanners])
+
+  const filteredPresets = useMemo(() => {
+    return presets.filter((preset) => {
+      const riskMatch = riskFilter === 'all' || preset.risk === riskFilter
+      const styleMatch = styleFilter === 'all' || preset.trade_style === styleFilter
+      return riskMatch && styleMatch
+    })
+  }, [presets, riskFilter, styleFilter])
 
   const supportedIndicators = useMemo(
     () => (metadata?.indicators ?? []).filter((indicator) => indicator.supported),
@@ -392,6 +402,7 @@ export function useScanner(initialCategorySymbols: string[]) {
     warnings,
     metadata,
     presets,
+    filteredPresets,
     savedScanners,
     loadingMetadata,
     loadingSaved,
@@ -399,6 +410,8 @@ export function useScanner(initialCategorySymbols: string[]) {
     summary,
     hasRun,
     lastRunAt,
+    riskFilter,
+    styleFilter,
     setConditions,
     setLogic,
     setGroups,
@@ -410,6 +423,8 @@ export function useScanner(initialCategorySymbols: string[]) {
     setScannerName,
     setTradeStyle,
     setTimeframe,
+    setRiskFilter,
+    setStyleFilter,
     applyPreset,
     loadSavedScanner,
     runScan,

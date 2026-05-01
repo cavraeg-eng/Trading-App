@@ -11,7 +11,7 @@ from trading_bot.api.routes.market import analyze_symbol
 from trading_bot.config import get_logger
 from trading_bot.data.market_data_service import get_ohlcv_with_metadata
 from trading_bot.persistence import repositories as repo
-from trading_bot.services.opportunity_ranker import rank_opportunity
+from trading_bot.services.opportunity_ranker import rank_opportunity, compute_risk_gate
 from trading_bot.services.scanner_engine import (
     ALLOWED_OPERATORS,
     INDICATOR_DEFINITION_MAP,
@@ -403,6 +403,16 @@ def evaluate_single_pair(
 
         analysis = analyze_symbol(symbol, timeframe, trade_style=trade_style)
         ranking = rank_opportunity(analysis or {}, source_metadata)
+        risk_gate = compute_risk_gate(analysis or {}, source_metadata)
+
+        # Build an improved reason that blends analysis rationale with matched conditions
+        matched_summary = f"Matched {matched_count}/{total_count} conditions"
+        if failed_conditions:
+            matched_summary += f"; missed {', '.join(failed_conditions[:3])}"
+        analysis_reason = (analysis or {}).get("reason", "")
+        reason = analysis_reason if analysis_reason else matched_summary
+        if analysis_reason and failed_conditions:
+            reason = f"{analysis_reason} ({matched_summary})"
 
         return {
             "symbol": symbol,
@@ -417,11 +427,20 @@ def evaluate_single_pair(
             "opportunity_score": ranking.get("opportunityScore"),
             "source_score": ranking.get("sourceScore"),
             "source_metadata": source_metadata,
-            "reason": (analysis or {}).get("reason") or (
-                f"Matched {matched_count}/{total_count} conditions"
-                + (f"; missed {', '.join(failed_conditions[:3])}" if failed_conditions else "")
-            ),
+            "reason": reason,
             "group_results": group_results,
+            "entry_range": (analysis or {}).get("entryRange"),
+            "stop_loss": (analysis or {}).get("stopLoss"),
+            "take_profit1": (analysis or {}).get("takeProfit1"),
+            "take_profit2": (analysis or {}).get("takeProfit2"),
+            "take_profit3": (analysis or {}).get("takeProfit3"),
+            "current_price": (analysis or {}).get("currentPrice"),
+            "risk_gate": risk_gate,
+            "risk_context": {
+                "volatility_regime": (analysis or {}).get("marketRegime", "ranging"),
+                "market_status": (source_metadata or {}).get("marketStatus", "unknown"),
+            },
+            "atr": (analysis or {}).get("atr"),
         }
 
     except Exception as e:
