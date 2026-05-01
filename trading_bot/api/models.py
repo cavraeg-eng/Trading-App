@@ -64,10 +64,13 @@ class PredictionNoTradeReason(str, Enum):
     """Machine-readable reasons for a valid no-trade prediction."""
     INSUFFICIENT_DATA = "insufficient_data"
     STALE_DATA = "stale_data"
+    EXCESSIVE_SPREAD = "excessive_spread"
     LOW_CONFIDENCE = "low_confidence"
     MARKET_CLOSED = "market_closed"
     RISK_LIMITS = "risk_limits"
     CONFLICTING_SIGNALS = "conflicting_signals"
+    HIGH_VOLATILITY_SPIKE = "high_volatility_spike"
+    MISSING_FEATURES = "missing_features"
     UNSUPPORTED_ASSET = "unsupported_asset"
     MODEL_UNAVAILABLE = "model_unavailable"
     REWARD_RISK_COMPRESSED = "reward_risk_compressed"
@@ -127,6 +130,14 @@ class PredictionRiskConstraints(BaseModel):
     max_symbol_exposure: Optional[float] = None
     max_total_exposure: Optional[float] = None
     trading_mode: Optional[str] = None
+
+
+class PredictionNoTradeDetail(BaseModel):
+    """Detailed no-trade gate result for UI and automation consumers."""
+    code: PredictionNoTradeReason
+    message: str
+    blocking: bool = True
+    context: Dict[str, Any] = {}
 
 
 class PredictionBrokerContext(BaseModel):
@@ -276,6 +287,7 @@ class PredictionResponse(BaseModel):
     confidence: float = Field(ge=0, le=100)
     confidence_band: PredictionConfidenceBand
     no_trade_reason: Optional[PredictionNoTradeReason] = None
+    no_trade_reasons: List[PredictionNoTradeDetail] = []
     entry: Optional[PredictionPriceZone] = None
     stop_loss: Optional[float] = None
     take_profit_targets: List[PredictionTarget] = []
@@ -305,6 +317,8 @@ class PredictionResponse(BaseModel):
         if self.recommendation == PredictionRecommendation.NO_TRADE:
             if self.no_trade_reason is None:
                 raise ValueError("no_trade responses require no_trade_reason")
+            if not self.no_trade_reasons:
+                raise ValueError("no_trade responses require at least one no_trade_reasons item")
             if self.entry is not None or self.stop_loss is not None or self.take_profit_targets:
                 raise ValueError("no_trade responses must not include actionable trade levels")
         elif self.recommendation in {PredictionRecommendation.BUY, PredictionRecommendation.SELL}:

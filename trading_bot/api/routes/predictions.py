@@ -14,6 +14,7 @@ from trading_bot.api.models import (
     PredictionConfidenceBand,
     PredictionFreshnessMetadata,
     PredictionLatencyMetadata,
+    PredictionNoTradeDetail,
     PredictionNoTradeReason,
     PredictionPositionSize,
     PredictionPriceZone,
@@ -33,6 +34,7 @@ from trading_bot.api.routes.market import ALLOWED_SYMBOLS, analyze_symbol, map_s
 from trading_bot.config import get_logger, get_settings
 from trading_bot.data.market_data_service import get_ohlcv_with_metadata
 from trading_bot.execution.broker_manager import BrokerOperationError, broker_manager
+from trading_bot.services.prediction_quality import NoTradeGate, evaluate_prediction_quality
 
 logger = get_logger(__name__)
 
@@ -132,14 +134,12 @@ async def _request_with_account_context(
     return request.model_copy(update={"broker_context": context})
 
 
-def _recommendation_from_signal(signal: object, confidence: float) -> PredictionRecommendation:
+def _recommendation_from_signal(signal: object) -> PredictionRecommendation:
     normalized = str(signal or "").lower()
     if normalized == "buy":
         return PredictionRecommendation.BUY
     if normalized == "sell":
         return PredictionRecommendation.SELL
-    if confidence < 45:
-        return PredictionRecommendation.NO_TRADE
     return PredictionRecommendation.HOLD
 
 
@@ -149,18 +149,16 @@ def _trade_style_for_strategy_mode(strategy_mode: PredictionStrategyMode) -> str
     return "swing"
 
 
-def _no_trade_reason(analysis: Optional[dict[str, Any]], metadata: dict[str, Any]) -> PredictionNoTradeReason:
-    quality_flags = list(metadata.get("qualityFlags") or [])
-    if analysis is None:
-        return PredictionNoTradeReason.INSUFFICIENT_DATA
-    if any(str(flag).startswith("stale_data") for flag in quality_flags):
-        return PredictionNoTradeReason.STALE_DATA
-    reason = str(analysis.get("reason") or "").lower()
-    if "reward-to-risk" in reason or "reward-to-risk is too compressed" in reason:
-        return PredictionNoTradeReason.REWARD_RISK_COMPRESSED
-    if "mixed" in reason or "conflicting" in reason:
-        return PredictionNoTradeReason.CONFLICTING_SIGNALS
-    return PredictionNoTradeReason.LOW_CONFIDENCE
+def _no_trade_details(gates: list[NoTradeGate]) -> list[PredictionNoTradeDetail]:
+    return [
+        PredictionNoTradeDetail(
+            code=gate.code,
+            message=gate.message,
+            blocking=gate.blocking,
+            context=gate.context,
+        )
+        for gate in gates
+    ]
 
 
 def _freshness_metadata(metadata: dict[str, Any]) -> PredictionFreshnessMetadata:
@@ -202,6 +200,28 @@ def _warnings_from_metadata(metadata: dict[str, Any]) -> list[PredictionWarning]
             severity="warning",
             message="Prediction input data may be stale.",
         ))
+    return warnings
+
+
+def _warnings_from_gates(gates: list[NoTradeGate]) -> list[PredictionWarning]:
+    warnings: list[PredictionWarning] = []
+    for gate in gates:
+        if gate.code == PredictionNoTradeReason.EXCESSIVE_SPREAD:
+            warnings.append(_warning(
+                PredictionWarningCode.WIDE_SPREAD,
+                gate.message,
+            ))
+        elif gate.code == PredictionNoTradeReason.HIGH_VOLATILITY_SPIKE:
+            warnings.append(_warning(
+                PredictionWarningCode.HIGH_VOLATILITY,
+                gate.message,
+            ))
+        elif gate.code == PredictionNoTradeReason.RISK_LIMITS:
+            warnings.append(_warning(
+                PredictionWarningCode.RISK_LIMITS,
+                gate.message,
+                "block",
+            ))
     return warnings
 
 
@@ -555,28 +575,42 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
     _, metadata = get_ohlcv_with_metadata(request.symbol, request.timeframe, trade_style=trade_style)
     elapsed_ms = (datetime.now(tz=timezone.utc) - started_at).total_seconds() * 1000
 
-    confidence = float((analysis or {}).get("confidence", 0))
-    recommendation = _recommendation_from_signal((analysis or {}).get("signal"), confidence)
+    quality = evaluate_prediction_quality(analysis, metadata, request.broker_context)
+    confidence = quality.confidence
+    recommendation = _recommendation_from_signal((analysis or {}).get("signal"))
     freshness = _freshness_metadata(metadata)
-    warnings = _warnings_from_metadata(metadata)
+    warnings = _warnings_from_metadata(metadata) + _warnings_from_gates(quality.gates)
     entry = None
     targets: list[PredictionTarget] = []
     stop_loss = None
     invalidation = None
     risk_reward = None
-    no_trade_reason = None
-
-    if recommendation == PredictionRecommendation.NO_TRADE:
-        no_trade_reason = _no_trade_reason(analysis, metadata)
-    elif analysis and recommendation in {PredictionRecommendation.BUY, PredictionRecommendation.SELL}:
+    if analysis and recommendation in {PredictionRecommendation.BUY, PredictionRecommendation.SELL}:
         entry, stop_loss, targets, invalidation, risk_reward = _trade_setup_levels(analysis)
-
-    if (
-        recommendation in {PredictionRecommendation.BUY, PredictionRecommendation.SELL}
+    incomplete_actionable_levels = (
+        (analysis or {}).get("signal") in {"buy", "sell"}
         and (entry is None or stop_loss is None or not targets or risk_reward is None)
-    ):
+    )
+    no_trade_reason = None
+    no_trade_reasons: list[PredictionNoTradeDetail] = []
+
+    if quality.gates:
+        recommendation = PredictionRecommendation.NO_TRADE
+        no_trade_reason = quality.gates[0].code
+        no_trade_reasons = _no_trade_details(quality.gates)
+        entry = None
+        stop_loss = None
+        targets = []
+        invalidation = None
+        risk_reward = None
+
+    if incomplete_actionable_levels and not quality.gates:
         recommendation = PredictionRecommendation.NO_TRADE
         no_trade_reason = PredictionNoTradeReason.INSUFFICIENT_DATA
+        no_trade_reasons = [PredictionNoTradeDetail(
+            code=PredictionNoTradeReason.INSUFFICIENT_DATA,
+            message="Actionable trade levels are incomplete for this suggestion.",
+        )]
         entry = None
         stop_loss = None
         targets = []
@@ -600,6 +634,10 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
     if recommendation in {PredictionRecommendation.BUY, PredictionRecommendation.SELL} and not trade_allowed:
         recommendation = PredictionRecommendation.NO_TRADE
         no_trade_reason = PredictionNoTradeReason.RISK_LIMITS
+        no_trade_reasons = [*no_trade_reasons, PredictionNoTradeDetail(
+            code=PredictionNoTradeReason.RISK_LIMITS,
+            message="Account risk checks blocked this suggestion.",
+        )]
         entry = None
         stop_loss = None
         targets = []
@@ -639,6 +677,7 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
         confidence=confidence,
         confidence_band=confidence_band_for_score(confidence),
         no_trade_reason=no_trade_reason,
+        no_trade_reasons=no_trade_reasons,
         entry=entry,
         stop_loss=stop_loss,
         take_profit_targets=targets,
@@ -670,6 +709,10 @@ def _unsupported_asset_response(request: PredictionRequest) -> PredictionRespons
         confidence=0,
         confidence_band=PredictionConfidenceBand.LOW,
         no_trade_reason=PredictionNoTradeReason.UNSUPPORTED_ASSET,
+        no_trade_reasons=[PredictionNoTradeDetail(
+            code=PredictionNoTradeReason.UNSUPPORTED_ASSET,
+            message=f"{request.symbol} is not supported.",
+        )],
         rationale=[PredictionRationaleItem(category="validation", summary=f"{request.symbol} is not supported.")],
         warnings=[_warning(
             PredictionWarningCode.UNSUPPORTED_ASSET,
@@ -718,7 +761,7 @@ async def get_prediction_contract() -> dict:
             "generated_at",
         ],
         "requiredForBuySell": ["entry", "stop_loss", "take_profit_targets", "risk_reward", "invalidation_level"],
-        "requiredForNoTrade": ["no_trade_reason"],
+        "requiredForNoTrade": ["no_trade_reason", "no_trade_reasons"],
         "optionalAccountRiskFields": [
             "account_context_status",
             "account_risk_warnings",

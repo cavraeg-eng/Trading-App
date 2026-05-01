@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { TrendingUp, TrendingDown, Activity, Zap, Loader2 } from 'lucide-react'
-import type { AccountMetrics, ForexPair, AIRecommendation, ChartSignalMarker, SignalStatus, AIScoreData, DetectedPattern, CopyTradingSettings, CopyTradePosition, CopyTradeStats } from '../types'
+import type { AccountMetrics, ForexPair, AIRecommendation, ChartSignalMarker, SignalStatus, AIScoreData, DetectedPattern, CopyTradingSettings, CopyTradePosition, CopyTradeStats, NoTradeReasonDetail } from '../types'
 import { getPairBySymbol } from '../config/forexPairs'
 import { PairSelector } from '../components/PairSelector'
 import { ChartToolbar } from '../components/ChartToolbar'
@@ -67,6 +67,8 @@ interface SignalDetails {
   aiScore?: AIScoreData
   patterns?: DetectedPattern[]
   patternAccuracy?: number | null
+  confidenceBand?: string
+  noTradeReasons?: NoTradeReasonDetail[]
 }
 
 interface ActiveSignalMeta {
@@ -190,6 +192,8 @@ function Dashboard({
     aiScore: undefined,
     patterns: [],
     patternAccuracy: null,
+    confidenceBand: undefined,
+    noTradeReasons: [],
   })
   
 
@@ -349,9 +353,10 @@ function Dashboard({
       inFlight = true
       setIsLoading(true)
       try {
-        const [analysisRes, signalRes] = await Promise.allSettled([
+        const [analysisRes, signalRes, predictionRes] = await Promise.allSettled([
           fetch(`/api/market/analysis/${encodeURIComponent(selectedPair.symbol)}?timeframe=${effectiveAnalysisTimeframe}&trade_style=${tradeStyle}`),
-          fetch(`/api/signals/breakdown/${encodeURIComponent(selectedPair.symbol)}?timeframe=${effectiveAnalysisTimeframe || '1h'}&trade_style=${tradeStyle}`)
+          fetch(`/api/signals/breakdown/${encodeURIComponent(selectedPair.symbol)}?timeframe=${effectiveAnalysisTimeframe || '1h'}&trade_style=${tradeStyle}`),
+          fetch(`/api/predictions/suggestion/${encodeURIComponent(selectedPair.symbol)}?timeframe=${effectiveAnalysisTimeframe}&strategy_mode=${tradeStyle === 'scalp' ? 'scalp' : 'swing'}`),
         ])
 
         // Process analysis result
@@ -414,6 +419,19 @@ function Dashboard({
           setChartSignals([])
           setSignalStatus(null)
           setActiveSignalMeta(null)
+        }
+
+        if (predictionRes.status === 'fulfilled' && predictionRes.value.ok) {
+          const prediction = await predictionRes.value.json()
+          if (cancelled) return
+          setSignalDetails((prev) => ({
+            ...prev,
+            signal: prediction.recommendation === 'no_trade' ? 'hold' : prediction.recommendation,
+            confidence: prediction.confidence ?? prev.confidence,
+            confidenceBand: prediction.confidence_band,
+            noTradeReasons: prediction.no_trade_reasons ?? [],
+            reason: prediction.suggestion_card?.summary ?? prev.reason,
+          }))
         }
 
         setLastSuccessfulFetch(Date.now())
