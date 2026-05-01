@@ -112,7 +112,7 @@ export function useScanner(initialCategorySymbols: string[]) {
 
   const filteredPresets = useMemo(() => {
     return presets.filter((preset) => {
-      const riskMatch = riskFilter === 'all' || preset.risk === riskFilter
+      const riskMatch = riskFilter === 'all' || (preset.risk ?? 'medium') === riskFilter
       const styleMatch = styleFilter === 'all' || preset.trade_style === styleFilter
       return riskMatch && styleMatch
     })
