@@ -143,6 +143,31 @@ def _targets(analysis: dict[str, Any]) -> list[PredictionTarget]:
     return targets
 
 
+def _trade_setup_levels(
+    analysis: dict[str, Any],
+) -> tuple[
+    Optional[PredictionPriceZone],
+    Optional[float],
+    list[PredictionTarget],
+    Optional[float],
+    Optional[float],
+]:
+    entry_range = analysis.get("entryRange") or {}
+    current_price = analysis.get("currentPrice", 0)
+    entry = PredictionPriceZone(
+        min=float(entry_range.get("min", current_price)),
+        max=float(entry_range.get("max", current_price)),
+        label="Entry zone",
+    )
+    stop_loss_raw = analysis.get("stopLoss")
+    risk_reward_raw = analysis.get("riskReward")
+    stop_loss = float(stop_loss_raw) if stop_loss_raw is not None else None
+    risk_reward = float(risk_reward_raw) if risk_reward_raw is not None else None
+    targets = _targets(analysis)
+    invalidation = stop_loss
+    return entry, stop_loss, targets, invalidation, risk_reward
+
+
 def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
     """Build a contract-compliant prediction response from current analysis."""
     if request.symbol not in ALLOWED_SYMBOLS and map_symbol_to_yf(request.symbol) not in ALLOWED_SYMBOLS:
@@ -168,18 +193,12 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
     if recommendation == PredictionRecommendation.NO_TRADE:
         no_trade_reason = _no_trade_reason(analysis, metadata)
     elif analysis:
-        entry_range = analysis.get("entryRange") or {}
-        entry = PredictionPriceZone(
-            min=float(entry_range.get("min", analysis.get("currentPrice", 0))),
-            max=float(entry_range.get("max", analysis.get("currentPrice", 0))),
-            label="Entry zone",
-        )
-        stop_loss = float(analysis["stopLoss"])
-        invalidation = stop_loss
-        targets = _targets(analysis)
-        risk_reward = float(analysis["riskReward"])
+        entry, stop_loss, targets, invalidation, risk_reward = _trade_setup_levels(analysis)
 
-    if recommendation in {PredictionRecommendation.BUY, PredictionRecommendation.SELL} and not targets:
+    if (
+        recommendation in {PredictionRecommendation.BUY, PredictionRecommendation.SELL}
+        and (entry is None or stop_loss is None or not targets or risk_reward is None)
+    ):
         recommendation = PredictionRecommendation.NO_TRADE
         no_trade_reason = PredictionNoTradeReason.INSUFFICIENT_DATA
         entry = None
@@ -311,4 +330,7 @@ async def get_prediction_suggestion(
         timeframe=timeframe,
         strategy_mode=strategy_mode,
     )
-    return build_prediction_response(request)
+    try:
+        return build_prediction_response(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

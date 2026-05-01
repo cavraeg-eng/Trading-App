@@ -19,6 +19,7 @@ from trading_bot.api.models import (
     PredictionTarget,
     confidence_band_for_score,
 )
+from trading_bot.api.routes import predictions
 from trading_bot.api.server import app
 
 
@@ -117,3 +118,39 @@ def test_contract_endpoint_documents_consumers():
     assert "scanner" in payload["compatibility"]
     assert "freshness" in payload["requiredForEveryResponse"]
     assert "entry" in payload["requiredForBuySell"]
+
+
+def test_hold_prediction_tolerates_missing_trade_levels(monkeypatch):
+    monkeypatch.setattr(
+        predictions,
+        "analyze_symbol",
+        lambda symbol, timeframe, trade_style="swing": {
+            "currentPrice": 1.1,
+            "signal": "hold",
+            "confidence": 52,
+            "reason": "indicators are mixed",
+        },
+    )
+    monkeypatch.setattr(
+        predictions,
+        "get_ohlcv_with_metadata",
+        lambda symbol, timeframe, trade_style="swing": (
+            None,
+            {
+                "sourceName": "test",
+                "sourceType": "fixture",
+                "priceSource": "fixture",
+                "isFallback": False,
+                "freshnessSeconds": 1,
+                "qualityFlags": [],
+                "marketStatus": "open",
+            },
+        ),
+    )
+
+    response = predictions.build_prediction_response(_request())
+
+    assert response.recommendation == PredictionRecommendation.HOLD
+    assert response.entry is not None
+    assert response.stop_loss is None
+    assert response.risk_reward is None
