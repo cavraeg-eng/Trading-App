@@ -179,6 +179,7 @@ export default function LiveTradeJournal() {
         const nullPnlSentinel = sortKey === 'pnl_asc' ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY
         const firstPnl = getEntryPnl(first) ?? nullPnlSentinel
         const secondPnl = getEntryPnl(second) ?? nullPnlSentinel
+        if (firstPnl === secondPnl) return 0
         return sortKey === 'pnl_desc' ? secondPnl - firstPnl : firstPnl - secondPnl
       }
       const firstTime = Date.parse(first.updated_at)
