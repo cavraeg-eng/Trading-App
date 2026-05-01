@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class SignalDirection(str, Enum):
@@ -86,6 +86,22 @@ class PredictionWarningCode(str, Enum):
     MODEL_DEGRADED = "model_degraded"
 
 
+class PredictionRationaleStance(str, Enum):
+    """How a rationale factor relates to the final recommendation."""
+    SUPPORTIVE = "supportive"
+    CONFLICTING = "conflicting"
+    WEAK = "weak"
+    NEUTRAL = "neutral"
+    BLOCKING = "blocking"
+
+
+class PredictionRationaleStrength(str, Enum):
+    """Relative impact of a rationale factor."""
+    STRONG = "strong"
+    MEDIUM = "medium"
+    WEAK = "weak"
+
+
 class PredictionBrokerContext(BaseModel):
     """Optional broker/account context for risk-aware prediction requests."""
     broker_id: Optional[str] = None
@@ -138,11 +154,32 @@ class PredictionTarget(BaseModel):
 
 
 class PredictionRationaleItem(BaseModel):
-    """Structured reason contributing to the prediction."""
+    """Legacy structured reason contributing to the prediction."""
     category: str
     summary: str
     weight: Optional[float] = None
     direction: Optional[str] = None
+
+
+class PredictionRationaleFactor(BaseModel):
+    """UI-renderable evidence, conflict, or blocker behind a prediction."""
+    category: str
+    stance: PredictionRationaleStance
+    strength: PredictionRationaleStrength = PredictionRationaleStrength.MEDIUM
+    message: str
+    weight: Optional[float] = None
+    direction: Optional[str] = None
+    source: Optional[str] = None
+
+
+class PredictionRationale(BaseModel):
+    """Explainable rationale object for prediction suggestions."""
+    summary: str
+    confidence_label: str
+    primary_reasons: List[PredictionRationaleFactor] = []
+    conflicts: List[PredictionRationaleFactor] = []
+    blockers: List[PredictionRationaleFactor] = []
+    next_conditions: List[str] = []
 
 
 class PredictionWarning(BaseModel):
@@ -221,7 +258,7 @@ class PredictionResponse(BaseModel):
     take_profit_targets: List[PredictionTarget] = []
     invalidation_level: Optional[float] = None
     risk_reward: Optional[float] = None
-    rationale: List[PredictionRationaleItem]
+    rationale: PredictionRationale
     warnings: List[PredictionWarning] = []
     freshness: PredictionFreshnessMetadata = Field(default_factory=PredictionFreshnessMetadata)
     latency: PredictionLatencyMetadata = Field(default_factory=PredictionLatencyMetadata)
@@ -235,6 +272,35 @@ class PredictionResponse(BaseModel):
         "automation": "Treat no_trade as a successful non-execution result and gate orders on recommendation, confidence, freshness, warnings, and risk_reward.",
     }
 
+    @field_validator("rationale", mode="before")
+    @classmethod
+    def normalize_legacy_rationale(cls, value: Any) -> Any:
+        if not isinstance(value, list):
+            return value
+
+        factors: List[PredictionRationaleFactor] = []
+        summary = "Prediction rationale provided."
+        for item in value:
+            data = item.model_dump() if isinstance(item, BaseModel) else dict(item)
+            message = str(data.get("summary") or "Prediction rationale provided.")
+            if not factors:
+                summary = message
+            factors.append(PredictionRationaleFactor(
+                category=str(data.get("category") or "summary"),
+                stance=PredictionRationaleStance.SUPPORTIVE,
+                strength=PredictionRationaleStrength.MEDIUM,
+                message=message,
+                weight=data.get("weight"),
+                direction=data.get("direction"),
+                source="legacy_rationale",
+            ))
+
+        return PredictionRationale(
+            summary=summary,
+            confidence_label="legacy",
+            primary_reasons=factors,
+        )
+
     @model_validator(mode="after")
     def validate_trade_state(self) -> "PredictionResponse":
         if self.recommendation == PredictionRecommendation.NO_TRADE:
@@ -242,11 +308,38 @@ class PredictionResponse(BaseModel):
                 raise ValueError("no_trade responses require no_trade_reason")
             if self.entry is not None or self.stop_loss is not None or self.take_profit_targets:
                 raise ValueError("no_trade responses must not include actionable trade levels")
+            if not self.rationale.blockers:
+                legacy_reasons = [
+                    factor
+                    for factor in self.rationale.primary_reasons
+                    if factor.source == "legacy_rationale"
+                ]
+                if legacy_reasons:
+                    self.rationale.blockers = [
+                        PredictionRationaleFactor(
+                            category=legacy_reasons[0].category,
+                            stance=PredictionRationaleStance.BLOCKING,
+                            strength=PredictionRationaleStrength.MEDIUM,
+                            message=legacy_reasons[0].message,
+                            direction=legacy_reasons[0].direction,
+                            source="legacy_rationale",
+                        )
+                    ]
+                    self.rationale.primary_reasons = []
+                else:
+                    raise ValueError("no_trade responses require rationale blockers")
+            if not self.rationale.next_conditions:
+                if self.rationale.blockers and self.rationale.blockers[0].source == "legacy_rationale":
+                    self.rationale.next_conditions = ["Wait for the blocking condition to clear before acting."]
+                else:
+                    raise ValueError("no_trade responses require rationale next_conditions")
         elif self.recommendation in {PredictionRecommendation.BUY, PredictionRecommendation.SELL}:
             if self.entry is None or self.stop_loss is None or not self.take_profit_targets:
                 raise ValueError("buy/sell responses require entry, stop_loss, and take_profit_targets")
             if self.risk_reward is None:
                 raise ValueError("buy/sell responses require risk_reward")
+            if not self.rationale.primary_reasons:
+                raise ValueError("buy/sell responses require rationale primary_reasons")
         return self
 
 
