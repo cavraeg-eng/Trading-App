@@ -124,7 +124,7 @@ Broker credentials for OANDA, Alpaca, and CCXT-based exchanges are entered throu
 Start the FastAPI backend from the repository root:
 
 ```bash
-uvicorn trading_bot.api.server:app --reload --host 0.0.0.0 --port 8010
+uvicorn trading_bot.api.server:app --reload --host 127.0.0.1 --port 8010
 ```
 
 Start the React frontend in another terminal:
