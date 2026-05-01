@@ -14,7 +14,12 @@ from trading_bot.api.models import (
     PredictionNoTradeReason,
     PredictionPositionContext,
     PredictionPriceZone,
+    PredictionRationale,
+    PredictionRationaleCategory,
+    PredictionRationaleFactor,
     PredictionRationaleItem,
+    PredictionRationaleStance,
+    PredictionRationaleStrength,
     PredictionRecommendation,
     PredictionRequest,
     PredictionResponse,
@@ -40,6 +45,33 @@ def _request() -> PredictionRequest:
 
 
 def _base_response(recommendation: PredictionRecommendation) -> dict:
+    rationale = PredictionRationale(
+        summary="Contract validation test.",
+        confidence_label=PredictionConfidenceBand.HIGH.value,
+        primary_reasons=[
+            PredictionRationaleFactor(
+                category=PredictionRationaleCategory.TREND,
+                stance=PredictionRationaleStance.SUPPORTIVE,
+                strength=PredictionRationaleStrength.STRONG,
+                message="Trend supports the setup.",
+            )
+        ],
+    )
+    if recommendation == PredictionRecommendation.NO_TRADE:
+        rationale = PredictionRationale(
+            summary="No trade: confidence is too low.",
+            confidence_label=PredictionConfidenceBand.LOW.value,
+            blockers=[
+                PredictionRationaleFactor(
+                    category=PredictionRationaleCategory.CONFIDENCE,
+                    stance=PredictionRationaleStance.BLOCKING,
+                    strength=PredictionRationaleStrength.MEDIUM,
+                    message="Confidence is too low for a trade.",
+                )
+            ],
+            next_conditions=["Wait for stronger confirmation."],
+        )
+
     return {
         "prediction_id": f"test-{recommendation.value}",
         "request": _request(),
@@ -50,7 +82,7 @@ def _base_response(recommendation: PredictionRecommendation) -> dict:
         "recommendation": recommendation,
         "confidence": 76,
         "confidence_band": PredictionConfidenceBand.HIGH,
-        "rationale": [PredictionRationaleItem(category="summary", summary="Contract validation test.")],
+        "rationale": rationale,
         "chart": PredictionChartOverlay(current_price=1.1),
         "suggestion_card": PredictionSuggestionCard(
             title="EUR/USD",
@@ -119,6 +151,25 @@ def test_no_trade_rejects_ambiguous_actionable_levels():
         PredictionResponse(**payload)
 
 
+def test_legacy_rationale_items_are_normalized_for_existing_callers():
+    payload = _base_response(PredictionRecommendation.BUY)
+    payload.update({
+        "entry": PredictionPriceZone(min=1.1, max=1.101, label="Entry zone"),
+        "stop_loss": 1.095,
+        "take_profit_targets": [PredictionTarget(label="TP1", price=1.11, reward_risk=2.0)],
+        "invalidation_level": 1.095,
+        "risk_reward": 2.0,
+        "expires_at": datetime.now(tz=timezone.utc),
+        "rationale": [PredictionRationaleItem(category="summary", summary="Legacy rationale.")],
+    })
+
+    response = PredictionResponse(**payload)
+
+    assert isinstance(response.rationale, PredictionRationale)
+    assert response.rationale.summary == "Legacy rationale."
+    assert response.rationale.primary_reasons[0].source == "legacy_rationale"
+
+
 def test_confidence_band_mapping_is_stable():
     assert confidence_band_for_score(20) == PredictionConfidenceBand.LOW
     assert confidence_band_for_score(55) == PredictionConfidenceBand.MEDIUM
@@ -142,6 +193,7 @@ def test_contract_endpoint_documents_consumers():
     assert "freshness" in payload["requiredForEveryResponse"]
     assert "entry" in payload["requiredForBuySell"]
     assert "expires_at" in payload["requiredForBuySell"]
+    assert "spread" in payload["rationaleCategories"]
 
 
 def test_hold_prediction_tolerates_missing_trade_levels(monkeypatch):
@@ -179,6 +231,10 @@ def test_hold_prediction_tolerates_missing_trade_levels(monkeypatch):
     assert response.chart.entry_zone is None
     assert response.stop_loss is None
     assert response.risk_reward is None
+    assert isinstance(response.rationale, PredictionRationale)
+    assert response.rationale.summary.startswith("Hold:")
+    assert response.rationale.primary_reasons
+    assert response.rationale.next_conditions
 
 
 def test_contract_endpoint_documents_strategy_mode_mapping():
@@ -273,6 +329,13 @@ def test_buy_prediction_generates_valid_actionable_suggestion(monkeypatch):
     assert response.expires_at is not None
     assert response.chart.expires_at == response.expires_at
     assert response.chart.annotations
+    assert isinstance(response.rationale, PredictionRationale)
+    assert response.rationale.primary_reasons
+    assert response.rationale.next_conditions
+    assert response.rationale.blockers == []
+    assert PredictionRationaleCategory.SPREAD in {
+        factor.category for factor in response.rationale.primary_reasons
+    }
 
 
 def test_sell_prediction_generates_valid_actionable_suggestion(monkeypatch):
@@ -381,6 +444,9 @@ def test_compressed_primary_target_reward_risk_downgrades_to_no_trade(monkeypatc
     assert response.entry is None
     assert response.stop_loss is None
     assert response.no_trade_reasons
+    assert isinstance(response.rationale, PredictionRationale)
+    assert response.rationale.blockers
+    assert response.rationale.next_conditions
 
 
 def _analysis(**overrides):
@@ -753,3 +819,45 @@ def test_primary_target_includes_reward_risk(monkeypatch):
     response = predictions.build_prediction_response(_request())
 
     assert response.take_profit_targets[0].reward_risk == 2.0
+
+
+def test_structured_rationale_uses_contract_categories_and_clean_summary(monkeypatch):
+    monkeypatch.setattr(
+        predictions,
+        "analyze_symbol",
+        lambda symbol, timeframe, trade_style="swing": _analysis(
+            currentPrice=1.1000,
+            signal="buy",
+            confidence=80,
+            reason="Trend alignment is clean.",
+            entryRange={"min": 1.0988, "max": 1.1000},
+            stopLoss=1.0960,
+            takeProfit1=1.1040,
+            takeProfit2=1.1080,
+            takeProfit3=1.1120,
+            riskReward=2.0,
+            atr=0.002,
+            indicators=[
+                {"name": f"Custom{i}", "value": str(i), "signal": "bullish"}
+                for i in range(7)
+            ],
+            higherTimeframeBias={"direction": "bullish", "strength": 0.8},
+            anchorModel={"support": 1.097, "resistance": 1.11},
+        ),
+    )
+    monkeypatch.setattr(
+        predictions,
+        "get_ohlcv_with_metadata",
+        lambda symbol, timeframe, trade_style="swing": (None, _metadata(marketStatus="open")),
+    )
+
+    response = predictions.build_prediction_response(_request())
+
+    assert response.rationale.summary == "Long setup: Trend alignment is clean."
+    assert PredictionRationaleCategory.SPREAD in {
+        factor.category for factor in response.rationale.primary_reasons
+    }
+    assert all(
+        isinstance(factor.category, PredictionRationaleCategory)
+        for factor in response.rationale.primary_reasons
+    )
