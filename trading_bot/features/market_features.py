@@ -233,6 +233,9 @@ def _normalize_candles(
     else:
         df.index = pd.to_datetime(df.index, utc=True, errors="coerce")
 
+    if df.index.has_duplicates or not df.index.is_monotonic_increasing:
+        _add_issue(flags, warnings, "inconsistent_timestamps")
+
     for column in ("open", "high", "low", "close", "volume"):
         if column in df:
             df[column] = pd.to_numeric(df[column], errors="coerce")
@@ -461,9 +464,14 @@ def _multi_timeframe_summary(
 def _rsi(close: pd.Series, period: int) -> pd.Series:
     delta = close.diff()
     gain = delta.where(delta > 0, 0.0).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0.0)).rolling(window=period).mean().replace(0, np.nan)
-    rs = gain / loss
-    return (100 - (100 / (1 + rs))).fillna(50.0)
+    loss = (-delta.where(delta < 0, 0.0)).rolling(window=period).mean()
+    safe_loss = loss.replace(0, np.nan)
+    rs = gain / safe_loss
+    rsi = 100 - (100 / (1 + rs))
+    rsi = rsi.mask((loss == 0) & (gain > 0), 100.0)
+    rsi = rsi.mask((gain == 0) & (loss > 0), 0.0)
+    rsi = rsi.mask((gain == 0) & (loss == 0), 50.0)
+    return rsi.fillna(50.0)
 
 
 def _ema(series: pd.Series, period: int) -> pd.Series:

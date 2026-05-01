@@ -56,7 +56,7 @@ def test_market_features_are_deterministic_for_forex_quote():
     assert first.as_dict() == second.as_dict()
     assert first.status == "ok"
     assert first.features["trend_direction"] == "up"
-    assert first.indicators["rsi_14"] >= 50
+    assert first.indicators["rsi_14"] == 100.0
     assert first.features["quote"]["spread"] == 0.0003
 
 
@@ -110,6 +110,27 @@ def test_insufficient_and_inconsistent_data_emit_quality_flags():
     assert payload.status == "warning"
     assert "insufficient_history" in payload.quality["flags"]
     assert "missing_intervals" in payload.quality["flags"]
+
+
+def test_unsorted_duplicate_candles_emit_inconsistent_timestamp_flag():
+    candles = _candles("forex", periods=35).reset_index(names="timestamp")
+    duplicate = candles.iloc[[5]].copy()
+    duplicate["open"] = duplicate["open"] + 0.001
+    duplicate["high"] = duplicate["high"] + 0.001
+    duplicate["low"] = duplicate["low"] + 0.001
+    duplicate["close"] = duplicate["close"] + 0.001
+    candles = pd.concat([candles.iloc[10:], duplicate, candles.iloc[:10]], ignore_index=True)
+
+    payload = build_market_features(
+        symbol="EUR/USD",
+        timeframe="1h",
+        candles=candles,
+        quote={"bid": 1.09, "ask": 1.0902},
+        reference_time=datetime(2026, 1, 2, 12, tzinfo=timezone.utc),
+    )
+
+    assert payload.status == "warning"
+    assert "inconsistent_timestamps" in payload.quality["flags"]
 
 
 def test_batch_isolates_bad_symbol_errors():
