@@ -171,3 +171,41 @@ def test_contract_endpoint_documents_strategy_mode_mapping():
         "position": "swing",
         "automation": "swing",
     }
+
+
+def test_incomplete_buy_levels_downgrade_to_no_trade_without_targets(monkeypatch):
+    monkeypatch.setattr(
+        predictions,
+        "analyze_symbol",
+        lambda symbol, timeframe, trade_style="swing": {
+            "currentPrice": 1.1,
+            "signal": "buy",
+            "confidence": 71,
+            "reason": "bullish but incomplete levels",
+            "entryRange": {"min": 1.1, "max": 1.101},
+            "takeProfit1": 1.11,
+        },
+    )
+    monkeypatch.setattr(
+        predictions,
+        "get_ohlcv_with_metadata",
+        lambda symbol, timeframe, trade_style="swing": (
+            None,
+            {
+                "sourceName": "test",
+                "sourceType": "fixture",
+                "priceSource": "fixture",
+                "isFallback": False,
+                "freshnessSeconds": 1,
+                "qualityFlags": [],
+                "marketStatus": "open",
+            },
+        ),
+    )
+
+    response = predictions.build_prediction_response(_request())
+
+    assert response.recommendation == PredictionRecommendation.NO_TRADE
+    assert response.no_trade_reason == PredictionNoTradeReason.INSUFFICIENT_DATA
+    assert response.take_profit_targets == []
+    assert response.chart.take_profit_targets == []

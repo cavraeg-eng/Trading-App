@@ -209,6 +209,7 @@ def build_prediction_response(request: PredictionRequest) -> PredictionResponse:
         no_trade_reason = PredictionNoTradeReason.INSUFFICIENT_DATA
         entry = None
         stop_loss = None
+        targets = []
         invalidation = None
         risk_reward = None
 
