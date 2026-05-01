@@ -77,7 +77,7 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
 app.add_middleware(NoCacheMiddleware)
 
 # Import and include routers
-from trading_bot.api.routes import scanner, signals, sentiment, broker, social, market
+from trading_bot.api.routes import scanner, signals, sentiment, broker, social, market, predictions
 from trading_bot.api.routes.backtest_routes import router as backtest_router
 from trading_bot.api.routes.paper_trading import router as paper_trading_router
 from trading_bot.api.routes.copy_trading import router as copy_trading_router
@@ -109,6 +109,7 @@ app.include_router(gold_intelligence_router)
 app.include_router(opportunities_router)
 app.include_router(reporting_router)
 app.include_router(strategies_router)
+app.include_router(predictions.router)
 
 
 @app.get("/api/health")
