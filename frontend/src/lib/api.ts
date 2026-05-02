@@ -113,6 +113,14 @@ export const api = {
       timeframe: string;
       trade_style: string;
       logic: string;
+      scan?: {
+        batch_duration_ms?: number;
+        concurrency_limit?: number;
+        total_symbols?: number;
+        succeeded?: number;
+        failed?: number;
+        unmatched?: number;
+      };
     };
   }> {
     return request('/api/scanner/scan', {

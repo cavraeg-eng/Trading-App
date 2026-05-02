@@ -1,8 +1,11 @@
 from pathlib import Path
+import threading
+import time
 
 from fastapi.testclient import TestClient
 
 from trading_bot.api.server import app
+from trading_bot.api.routes import scanner
 from trading_bot.persistence.db import init_db
 
 
@@ -120,6 +123,97 @@ def test_scan_returns_actionable_fields():
         if "entry_range" in result:
             assert "min" in result["entry_range"]
             assert "max" in result["entry_range"]
+
+
+def test_scan_returns_partial_errors_and_scan_metadata(monkeypatch):
+    def fake_evaluate(symbol, conditions, logic, trade_style, timeframe, groups):
+        if symbol == "FAIL/USD":
+            raise RuntimeError("market data unavailable")
+        return {
+            "symbol": symbol,
+            "signal": "BUY",
+            "score": 1.0,
+            "matching_conditions": ["RSI < 100"],
+            "indicator_values": {"RSI": 50},
+            "confidence": 80,
+            "trade_style": trade_style,
+            "timeframe": timeframe,
+            "opportunity_score": 70 if symbol == "EUR/USD" else 90,
+            "reason": "Matched scanner conditions.",
+        }
+
+    monkeypatch.setattr(scanner, "evaluate_single_pair", fake_evaluate)
+    monkeypatch.setattr(scanner, "get_scanner_concurrency_limit", lambda total_symbols=None: 2)
+
+    response = client.post(
+        "/api/scanner/scan",
+        json={
+            "name": "Partial errors",
+            "conditions": [{"indicator": "RSI", "operator": "<", "value": 100}],
+            "logic": "AND",
+            "pairs": ["EUR/USD", "FAIL/USD", "GBP/USD"],
+            "trade_style": "swing",
+            "timeframe": "1h",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_matches"] == 2
+    assert payload["meta"]["scan"]["succeeded"] == 2
+    assert payload["meta"]["scan"]["failed"] == 1
+    assert payload["meta"]["scan"]["concurrency_limit"] == 2
+    assert payload["meta"]["scan"]["batch_duration_ms"] >= 0
+    assert [item["symbol"] for item in payload["results"]] == ["GBP/USD", "EUR/USD", "FAIL/USD"]
+    failed = payload["results"][-1]
+    assert failed["scan_status"] == "error"
+    assert failed["error_message"] == "market data unavailable"
+    assert failed["evaluation_latency_ms"] >= 0
+
+
+def test_scan_respects_configured_concurrency(monkeypatch):
+    lock = threading.Lock()
+    active = 0
+    max_seen = 0
+
+    def fake_evaluate(symbol, conditions, logic, trade_style, timeframe, groups):
+        nonlocal active, max_seen
+        with lock:
+            active += 1
+            max_seen = max(max_seen, active)
+        time.sleep(0.03)
+        with lock:
+            active -= 1
+        return {
+            "symbol": symbol,
+            "signal": "BUY",
+            "score": 1.0,
+            "matching_conditions": ["RSI < 100"],
+            "indicator_values": {"RSI": 50},
+            "confidence": 80,
+            "trade_style": trade_style,
+            "timeframe": timeframe,
+            "opportunity_score": 50,
+            "reason": "Matched scanner conditions.",
+        }
+
+    monkeypatch.setattr(scanner, "evaluate_single_pair", fake_evaluate)
+    monkeypatch.setattr(scanner, "get_scanner_concurrency_limit", lambda total_symbols=None: 2)
+
+    response = client.post(
+        "/api/scanner/scan",
+        json={
+            "name": "Concurrency",
+            "conditions": [{"indicator": "RSI", "operator": "<", "value": 100}],
+            "logic": "AND",
+            "pairs": ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "NZD/USD"],
+            "trade_style": "swing",
+            "timeframe": "1h",
+        },
+    )
+
+    assert response.status_code == 200
+    assert max_seen == 2
 
 
 def test_scanner_alert_creation():

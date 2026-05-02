@@ -150,6 +150,7 @@ export default function Scanner({
     loading,
     error,
     warnings,
+    scanMetadata,
     presets,
     filteredPresets,
     savedScanners,
@@ -369,6 +370,9 @@ export default function Scanner({
               <span className={`font-medium ${summary.total > 0 ? 'text-trading-buy' : 'text-trading-muted'}`}>
                 {summary.total}/{totalScanned}
               </span>
+              {scanMetadata?.batch_duration_ms != null ? (
+                <span>{Math.round(scanMetadata.batch_duration_ms)}ms · c{scanMetadata.concurrency_limit ?? '-'}</span>
+              ) : null}
             </>
           ) : null}
         </div>
@@ -595,6 +599,14 @@ export default function Scanner({
                 <span className="text-trading-sell">{summary.sell} SELL</span>
                 <span className="text-trading-muted">{summary.neutral} neutral</span>
                 <span className="text-trading-muted">Avg opp: {summary.averageOpportunity}%</span>
+                {scanMetadata?.failed ? (
+                  <span className="text-rose-300">{scanMetadata.failed} failed</span>
+                ) : null}
+                {scanMetadata?.batch_duration_ms != null ? (
+                  <span className="text-trading-muted">
+                    {Math.round(scanMetadata.batch_duration_ms)}ms · concurrency {scanMetadata.concurrency_limit ?? '-'}
+                  </span>
+                ) : null}
 
                 <div className="ml-auto flex items-center gap-2">
                   <select
@@ -623,18 +635,26 @@ export default function Scanner({
                   const resultKey = `${result.symbol}-${result.timeframe}-${result.trade_style}`
                   const isMenuOpen = openMenuId === resultKey
                   const showIndicators = expandedIndicators.has(resultKey)
+                  const isError = result.scan_status === 'error'
 
                   return (
-                    <div key={resultKey} className="px-4 py-3 transition-colors hover:bg-trading-bg/30">
+                    <div key={resultKey} className={`px-4 py-3 transition-colors hover:bg-trading-bg/30 ${isError ? 'bg-rose-500/5' : ''}`}>
                       {/* Row 1: Symbol + signal + score + actions */}
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-base font-bold text-trading-text">{result.symbol}</span>
                             {pair ? <span className="hidden text-xs text-trading-muted sm:inline">{pair.name}</span> : null}
-                            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${signalBg(result.signal)}`}>
-                              {result.signal || 'NEUTRAL'}
-                            </span>
+                            {!isError ? (
+                              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${signalBg(result.signal)}`}>
+                                {result.signal || 'NEUTRAL'}
+                              </span>
+                            ) : null}
+                            {isError ? (
+                              <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-rose-300">
+                                Error
+                              </span>
+                            ) : null}
                             <div className="flex items-center gap-1.5">
                               <div className="h-1.5 w-16 overflow-hidden rounded-full bg-trading-bg sm:w-24">
                                 <div className={`h-full ${scoreBar(result.score)} transition-all`} style={{ width: `${result.score * 100}%` }} />
@@ -642,14 +662,15 @@ export default function Scanner({
                               <span className="text-xs font-medium text-trading-text">{Math.round(result.score * 100)}%</span>
                             </div>
                           </div>
-                          <p className="mt-1 text-xs text-trading-muted">{result.reason || 'Matched scanner conditions.'}</p>
+                          <p className={`mt-1 text-xs ${isError ? 'text-rose-200' : 'text-trading-muted'}`}>{result.error_message || result.reason || 'Matched scanner conditions.'}</p>
                         </div>
 
                         {/* Actions: primary + overflow menu */}
                         <div className="flex shrink-0 items-center gap-1.5">
                           <button
                             onClick={() => handleTradeClick(result.symbol)}
-                            className="inline-flex items-center gap-1 rounded-md bg-trading-accent px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-600"
+                            disabled={isError}
+                            className="inline-flex items-center gap-1 rounded-md bg-trading-accent px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
                           >
                             Trade <ArrowRight size={12} />
                           </button>
@@ -741,6 +762,16 @@ export default function Scanner({
                         ) : null}
                         {result.timeframe ? (
                           <span className="rounded-md bg-trading-bg px-2 py-0.5 text-[10px] text-trading-muted">{result.timeframe.toUpperCase()}</span>
+                        ) : null}
+                        {result.evaluation_latency_ms != null ? (
+                          <span className="rounded-md bg-trading-bg px-2 py-0.5 text-[10px] text-trading-muted">
+                            Eval: {Math.round(result.evaluation_latency_ms)}ms
+                          </span>
+                        ) : null}
+                        {result.prediction_latency_ms != null ? (
+                          <span className="rounded-md bg-trading-bg px-2 py-0.5 text-[10px] text-trading-muted">
+                            AI: {Math.round(result.prediction_latency_ms)}ms
+                          </span>
                         ) : null}
                       </div>
 

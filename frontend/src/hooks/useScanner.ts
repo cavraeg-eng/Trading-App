@@ -9,6 +9,7 @@ import type {
   ScannerLogic,
   ScannerMetadata,
   ScannerPreset,
+  ScannerRunMetadata,
   ScannerTimeframe,
   TradeStyle,
 } from '../types'
@@ -55,6 +56,7 @@ export function useScanner(initialCategorySymbols: string[]) {
   const [error, setError] = useState<string | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [metadata, setMetadata] = useState<ScannerMetadata | null>(null)
+  const [scanMetadata, setScanMetadata] = useState<ScannerRunMetadata | null>(null)
   const [presets, setPresets] = useState<ScannerPreset[]>([])
   const [savedScanners, setSavedScanners] = useState<SavedScanner[]>([])
   const [loadingMetadata, setLoadingMetadata] = useState(true)
@@ -248,6 +250,7 @@ export function useScanner(initialCategorySymbols: string[]) {
       timeframe: savedScanner.config.timeframe || '1h',
     })
     setWarnings([])
+    setScanMetadata(null)
     setError(null)
   }, [])
 
@@ -274,6 +277,7 @@ export function useScanner(initialCategorySymbols: string[]) {
       pairs: preset.recommended_pairs || prev.pairs || [],
     }))
     setWarnings([])
+    setScanMetadata(null)
     setError(null)
   }, [])
 
@@ -320,6 +324,7 @@ export function useScanner(initialCategorySymbols: string[]) {
         setResults(response.results || [])
         setTotalScanned(response.total_scanned || 0)
         setWarnings(response.warnings || [])
+        setScanMetadata(response.meta?.scan || null)
         setLastRunAt(new Date().toISOString())
       } catch (err) {
         if (abortController.signal.aborted) return
@@ -327,6 +332,7 @@ export function useScanner(initialCategorySymbols: string[]) {
         setError(apiError?.detail || 'Scanner request failed. Please try again.')
         setResults([])
         setTotalScanned(0)
+        setScanMetadata(null)
       } finally {
         if (requestId === requestIdRef.current) {
           setLoading(false)
@@ -374,14 +380,15 @@ export function useScanner(initialCategorySymbols: string[]) {
   }, [config, groups])
 
   const summary = useMemo<ScannerSummary>(() => {
-    const buy = results.filter((row) => (row.signal || '').toUpperCase() === 'BUY').length
-    const sell = results.filter((row) => (row.signal || '').toUpperCase() === 'SELL').length
-    const neutral = results.filter((row) => !row.signal || row.signal.toUpperCase() === 'NEUTRAL').length
-    const averageOpportunity = results.length
-      ? Math.round(results.reduce((sum, row) => sum + (row.opportunity_score || 0), 0) / results.length)
+    const matchedResults = results.filter((row) => row.scan_status !== 'error')
+    const buy = matchedResults.filter((row) => (row.signal || '').toUpperCase() === 'BUY').length
+    const sell = matchedResults.filter((row) => (row.signal || '').toUpperCase() === 'SELL').length
+    const neutral = matchedResults.filter((row) => !row.signal || row.signal.toUpperCase() === 'NEUTRAL').length
+    const averageOpportunity = matchedResults.length
+      ? Math.round(matchedResults.reduce((sum, row) => sum + (row.opportunity_score || 0), 0) / matchedResults.length)
       : 0
     return {
-      total: results.length,
+      total: matchedResults.length,
       buy,
       sell,
       neutral,
@@ -401,6 +408,7 @@ export function useScanner(initialCategorySymbols: string[]) {
     error,
     warnings,
     metadata,
+    scanMetadata,
     presets,
     filteredPresets,
     savedScanners,
