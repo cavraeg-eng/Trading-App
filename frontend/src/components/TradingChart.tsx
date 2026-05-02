@@ -93,7 +93,7 @@ function clampPercent(value: number) {
 function getSignalSetupStatus(signal: ChartSignalMarker): TradeLevelOverlayStatus {
   if (signal.setupStatus) return signal.setupStatus;
   if (signal.status === 'EXPIRED') return 'closed';
-  return 'active';
+  return 'pending';
 }
 
 function getOverlayStatusClasses(status: TradeLevelOverlayStatus) {
@@ -477,7 +477,8 @@ function TradingChart({
 
   const activeLevelLines = useMemo<OverlayLine[]>(() => {
     if (!activePosition) return [];
-    if (latestSignal?.setupStatus === 'active') return [];
+    const latestSignalStatus = latestSignal ? getSignalSetupStatus(latestSignal) : null;
+    if (latestSignalStatus === 'active' || latestSignalStatus === 'pending') return [];
     const status = activePosition.status ?? 'active';
     const lines: OverlayLine[] = [];
 
@@ -678,6 +679,8 @@ function TradingChart({
 
     setCandles([]);
     applyCandlesToChart([]);
+    chartCandlesRef.current = [];
+    autoScrollRef.current = true;
     void fetchCandles();
     const intervalId = window.setInterval(() => void fetchCandles(), 15_000);
 
@@ -801,10 +804,11 @@ function TradingChart({
     priceLineRefs.current = new Map();
 
     chartCandlesRef.current = [];
+    autoScrollRef.current = true;
     series.setData([]);
     syncPriceLines(series, priceLineRefs.current, priceLineSpecs);
     const visibleRangeSubscription = () => {
-      autoScrollRef.current = chart.timeScale().scrollPosition() < 2;
+      autoScrollRef.current = chart.timeScale().scrollPosition() <= 10;
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(visibleRangeSubscription);
 
