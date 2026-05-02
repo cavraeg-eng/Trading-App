@@ -23,6 +23,9 @@ import type {
   CopyTradePosition,
   CopyTradeStats,
   CopyTradingSettings,
+  PredictionAssetClass,
+  PredictionResponse,
+  PredictionStrategyMode,
 } from '../types';
 
 const BASE = '';  // relative — Vite proxy forwards /api/* to the backend
@@ -201,6 +204,23 @@ export const api = {
     if (tradeStyle) params.set('trade_style', tradeStyle);
     const qs = params.toString();
     return request(`/api/ai/score/${encodeURIComponent(symbol)}${qs ? `?${qs}` : ''}`);
+  },
+
+  fetchPredictionSuggestion(params: {
+    symbol: string;
+    assetClass?: PredictionAssetClass;
+    timeframe?: string;
+    strategyMode?: PredictionStrategyMode;
+  }): Promise<PredictionResponse> {
+    return request<PredictionResponse>('/api/predictions/suggestion', {
+      method: 'POST',
+      body: JSON.stringify({
+        symbol: params.symbol,
+        asset_class: params.assetClass ?? 'unknown',
+        timeframe: params.timeframe ?? '1h',
+        strategy_mode: params.strategyMode ?? 'swing',
+      }),
+    });
   },
 
   // Multi-TF Alignment

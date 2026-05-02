@@ -154,6 +154,26 @@ class Settings(BaseSettings):
         default=0.15,
         description="Annualized volatility target"
     )
+    prediction_min_actionable_confidence: float = Field(
+        default=62.0,
+        description="Minimum calibrated confidence required for actionable AI predictions"
+    )
+    prediction_stale_data_seconds: float = Field(
+        default=900.0,
+        description="Maximum source freshness age in seconds before AI predictions are gated"
+    )
+    prediction_max_spread_bps: float = Field(
+        default=8.0,
+        description="Maximum estimated spread in basis points before AI predictions are gated"
+    )
+    prediction_min_risk_reward: float = Field(
+        default=1.35,
+        description="Minimum reward-to-risk ratio required for actionable AI predictions"
+    )
+    prediction_volatility_spike_atr_pct: float = Field(
+        default=2.5,
+        description="ATR percentage threshold treated as a high-volatility no-trade spike"
+    )
     
     # ============================================
     # Data Storage

@@ -240,6 +240,108 @@ export interface SourceMetadata {
   marketStatus: 'live' | 'delayed' | 'stale' | 'unknown' | string;
 }
 
+export interface NoTradeReasonDetail {
+  code: string;
+  message: string;
+  blocking?: boolean;
+  context?: Record<string, unknown>;
+}
+
+export type PredictionAssetClass = 'forex' | 'metal' | 'crypto' | 'index' | 'equity' | 'commodity' | 'unknown';
+export type PredictionStrategyMode = 'scalp' | 'swing' | 'position' | 'intraday' | 'automation';
+export type PredictionRecommendation = 'buy' | 'sell' | 'hold' | 'no_trade';
+export type PredictionConfidenceBand = 'low' | 'medium' | 'high' | 'very_high';
+export type PredictionNoTradeReason =
+  | 'insufficient_data'
+  | 'stale_data'
+  | 'excessive_spread'
+  | 'low_confidence'
+  | 'market_closed'
+  | 'risk_limits'
+  | 'conflicting_signals'
+  | 'high_volatility_spike'
+  | 'missing_features'
+  | 'unsupported_asset'
+  | 'model_unavailable'
+  | 'reward_risk_compressed'
+  | 'automation_disabled';
+
+export interface PredictionPriceZone {
+  min: number;
+  max: number;
+  label?: string | null;
+}
+
+export interface PredictionTarget {
+  label: string;
+  price: number;
+  reward_risk?: number | null;
+  size_percent?: number | null;
+}
+
+export interface PredictionWarning {
+  code: string;
+  message: string;
+  severity: string;
+}
+
+export interface PredictionChartOverlay {
+  current_price?: number | null;
+  entry_zone?: PredictionPriceZone | null;
+  stop_loss?: number | null;
+  take_profit_targets: PredictionTarget[];
+  invalidation_level?: number | null;
+  expires_at?: string | null;
+  support?: number | null;
+  resistance?: number | null;
+  annotations: Array<Record<string, unknown>>;
+}
+
+export interface PredictionSuggestionCard {
+  title: string;
+  subtitle?: string | null;
+  badge: string;
+  summary: string;
+  primary_metric_label?: string | null;
+  primary_metric_value?: string | null;
+  action_label?: string | null;
+}
+
+export interface PredictionResponse {
+  prediction_id: string;
+  symbol: string;
+  asset_class: PredictionAssetClass;
+  timeframe: string;
+  strategy_mode: PredictionStrategyMode;
+  recommendation: PredictionRecommendation;
+  confidence: number;
+  confidence_band: PredictionConfidenceBand;
+  no_trade_reason?: PredictionNoTradeReason | null;
+  no_trade_reasons: NoTradeReasonDetail[];
+  entry?: PredictionPriceZone | null;
+  stop_loss?: number | null;
+  take_profit_targets: PredictionTarget[];
+  invalidation_level?: number | null;
+  risk_reward?: number | null;
+  expires_at?: string | null;
+  warnings: PredictionWarning[];
+  account_risk_warnings?: PredictionWarning[];
+  account_context_status?: 'available' | 'partial' | 'missing' | 'stale' | string;
+  position_size?: {
+    quantity: number;
+    unit: string;
+    risk_amount: number;
+    risk_percent: number;
+    stop_distance: number;
+    notional?: number | null;
+  } | null;
+  position_size_reason?: string | null;
+  trade_allowed?: boolean;
+  chart: PredictionChartOverlay;
+  suggestion_card: PredictionSuggestionCard;
+  generated_at: string;
+}
+
 export interface GoldContextData {
   symbol: string;
   timestamp: number;
