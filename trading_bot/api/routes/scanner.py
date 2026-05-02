@@ -52,7 +52,6 @@ def get_scanner_concurrency_limit(total_symbols: Optional[int] = None) -> int:
         value = int(configured)
     except (TypeError, ValueError):
         value = SCANNER_CONCURRENCY_FALLBACK
-    value = max(1, min(value, 12))
     if total_symbols is None:
         return value
     return max(1, min(value, max(total_symbols, 1)))
@@ -551,10 +550,6 @@ async def evaluate_single_pair_async(
             return None
         result["evaluation_latency_ms"] = latency_ms
         result.setdefault("scan_status", "matched")
-        if "prediction_latency_ms" not in result:
-            prediction_latency = ((result.get("prediction_latency") or {}).get("total_latency_ms"))
-            if prediction_latency is not None:
-                result["prediction_latency_ms"] = prediction_latency
         return result
 
 

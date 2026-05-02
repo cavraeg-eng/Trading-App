@@ -645,9 +645,11 @@ export default function Scanner({
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-base font-bold text-trading-text">{result.symbol}</span>
                             {pair ? <span className="hidden text-xs text-trading-muted sm:inline">{pair.name}</span> : null}
-                            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${signalBg(result.signal)}`}>
-                              {result.signal || 'NEUTRAL'}
-                            </span>
+                            {!isError ? (
+                              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${signalBg(result.signal)}`}>
+                                {result.signal || 'NEUTRAL'}
+                              </span>
+                            ) : null}
                             {isError ? (
                               <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-rose-300">
                                 Error
