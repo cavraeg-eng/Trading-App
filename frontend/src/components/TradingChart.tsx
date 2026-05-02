@@ -800,16 +800,8 @@ function TradingChart({
     seriesRef.current = series;
     priceLineRefs.current = new Map();
 
-    const chartData = candles.map(toChartCandle);
-    chartCandlesRef.current = candles;
-    series.setData(chartData);
-    if (chartData.length) {
-      const visibleFrom = Math.max(0, chartData.length - VISIBLE_CANDLE_ESTIMATE);
-      chart.timeScale().setVisibleLogicalRange({
-        from: visibleFrom,
-        to: chartData.length + 8,
-      });
-    }
+    chartCandlesRef.current = [];
+    series.setData([]);
     syncPriceLines(series, priceLineRefs.current, priceLineSpecs);
     const visibleRangeSubscription = () => {
       autoScrollRef.current = chart.timeScale().scrollPosition() < 2;
