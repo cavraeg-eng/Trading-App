@@ -16,12 +16,12 @@ from trading_bot.api.models import (
     PredictionStrategyMode,
     ScannerConfig,
 )
-from trading_bot.api.routes.predictions import _asset_class_for_symbol, build_prediction_response
 from trading_bot.config import get_logger, get_settings
 from trading_bot.data.market_data_service import get_ohlcv_with_metadata
 from trading_bot.services.market_analysis import analyze_symbol
 from trading_bot.monitoring.bot_metrics import bot_metrics
 from trading_bot.persistence import repositories as repo
+from trading_bot.services.prediction_pipeline import asset_class_for_symbol, build_prediction_response
 from trading_bot.services.opportunity_ranker import rank_opportunity
 from trading_bot.services.scanner_engine import (
     ALLOWED_OPERATORS,
@@ -468,7 +468,7 @@ def evaluate_single_pair(
         analysis = analyze_symbol(symbol, timeframe, trade_style=trade_style)
         prediction_request = PredictionRequest(
             symbol=symbol,
-            asset_class=_asset_class_for_symbol(symbol),
+            asset_class=asset_class_for_symbol(symbol),
             timeframe=timeframe,
             strategy_mode=PredictionStrategyMode.SCALP if trade_style == "scalp" else PredictionStrategyMode.SWING,
             source_context=PredictionSourceContext(source_type=PredictionSourceType.SCANNER),
