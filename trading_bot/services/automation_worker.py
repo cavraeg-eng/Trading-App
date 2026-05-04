@@ -4,10 +4,10 @@ import asyncio
 import time
 from typing import Dict, Optional
 
-from trading_bot.api.routes.paper_trading import PaperOrderRequest, place_paper_order
 from trading_bot.config import get_logger
 from trading_bot.execution.broker_base import OrderSide, OrderType
 from trading_bot.execution.broker_manager import BrokerOperationError, broker_manager
+from trading_bot.execution.paper import PaperOrderCommand, place_paper_order
 from trading_bot.persistence import repositories as repo
 from trading_bot.services.automation_safety import (
     validate_live_execution_gate,
@@ -323,9 +323,11 @@ async def _automation_loop() -> None:
             else:
                 # Paper mode: use paper balance
                 stop_distance = abs(current_price - stop_loss)
-                risk_amount = repo.get_paper_account().get("balance", 10000.0) * (allocation_percent / 100.0)
+                risk_amount = repo.get_paper_account().get("balance", 10000.0) * (
+                    allocation_percent / 100.0
+                )
                 quantity = max(0.01, risk_amount / stop_distance) if stop_distance > 0 else 0.01
-                await place_paper_order(PaperOrderRequest(
+                await place_paper_order(PaperOrderCommand(
                     symbol=symbol,
                     side=side,
                     quantity=round(quantity, 2),

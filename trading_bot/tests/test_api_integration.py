@@ -71,7 +71,7 @@ class TestPersistence:
             init_db(invalid_path)
 
     def test_state_restoration_rehydrates_paper_account_and_active_broker(self, tmp_path):
-        from trading_bot.api.routes.paper_trading import _paper_account, restore_paper_trading_state
+        from trading_bot.execution.paper import _paper_account, restore_paper_trading_state
         from trading_bot.execution.broker_base import BaseBroker
         from trading_bot.execution.broker_manager import BrokerManager
         from trading_bot.persistence import repositories as repo
