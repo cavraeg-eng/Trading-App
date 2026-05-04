@@ -120,6 +120,7 @@ experiments/
 .playwright-cli/
 .qoder/
 .verdent/
+.verdent-worktrees/
 .tmp*/
 .tmp_*/
 tmp/

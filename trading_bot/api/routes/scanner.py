@@ -479,6 +479,12 @@ def evaluate_single_pair(
             metadata_override=source_metadata,
         )
         ranking = rank_opportunity(analysis or {}, source_metadata)
+        recommendation = (analysis or {}).get("signal", signal)
+        entry_range = (analysis or {}).get("entryRange")
+        quality_flags = source_metadata.get("qualityFlags", []) if isinstance(source_metadata, dict) else []
+        warnings = [str(flag).replace("_", " ") for flag in quality_flags if flag]
+        if recommendation == "hold":
+            warnings.append("No actionable trade from current AI analysis")
 
         # Build an improved reason that blends analysis rationale with matched conditions
         matched_summary = f"Matched {matched_count}/{total_count} conditions"
@@ -491,7 +497,8 @@ def evaluate_single_pair(
 
         return {
             "symbol": symbol,
-            "signal": signal,
+            "signal": str(recommendation).upper() if recommendation else signal,
+            "recommendation": str(recommendation).upper() if recommendation else signal,
             "score": round(safe_float(score), 4),
             "matching_conditions": matching_conditions,
             "indicator_values": safe_indicators,
@@ -511,6 +518,9 @@ def evaluate_single_pair(
             },
             "prediction_latency_ms": prediction.latency.total_latency_ms,
             "reason": reason,
+            "risk_reward": (analysis or {}).get("riskReward"),
+            "data_fetched_at": (analysis or {}).get("data_fetched_at"),
+            "warnings": warnings,
             "group_results": group_results,
             "entry_range": (analysis or {}).get("entryRange"),
             "stop_loss": (analysis or {}).get("stopLoss"),

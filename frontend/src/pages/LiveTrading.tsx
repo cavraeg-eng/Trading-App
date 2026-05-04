@@ -1,11 +1,13 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Power, ChevronDown, AlertCircle, Check, X, XCircle, RefreshCw, Brain, TrendingUp, TrendingDown, Plus, ArrowRight, Calendar, Filter, BarChart2, Edit3 } from 'lucide-react'
-import type { ForexPair, StrategyDefinition, ChartSignalMarker, ActivePositionOverlay, GhostTradeOverlay } from '../types'
+import type { ForexPair, StrategyDefinition, ChartSignalMarker, ActivePositionOverlay, GhostTradeOverlay, AIPrediction } from '../types'
 import { api } from '../lib/api'
 import { ALL_FOREX_PAIRS, getPairBySymbol } from '../config/forexPairs'
 import { formatDateTimeWithZone } from '../lib/time'
 import TradingChart, { ChartErrorBoundary } from '../components/TradingChart'
 import { ChartToolbar } from '../components/ChartToolbar'
+import { AIPredictionPanel } from '../components/AIPredictionPanel'
+import { predictionToChartSignal } from '../lib/predictionPresentation'
 
 interface LiveTradingProps {
   selectedPair: ForexPair
@@ -361,6 +363,9 @@ function LiveTrading({
     tradeStyle?: string
     fallbackReason?: string
   } | null>(null)
+  const [selectedPrediction, setSelectedPrediction] = useState<AIPrediction | null>(null)
+  const [predictionLoading, setPredictionLoading] = useState(false)
+  const [predictionError, setPredictionError] = useState<string | null>(null)
 
   // MT5-style tab state
   const [activeTab, setActiveTab] = useState<'positions' | 'orders' | 'history'>('positions')
@@ -734,6 +739,26 @@ function LiveTrading({
     return () => clearInterval(interval)
   }, [selectedPair.symbol])
 
+  const refreshPrediction = useCallback(async () => {
+    setPredictionLoading(true)
+    setPredictionError(null)
+    try {
+      const prediction = await api.fetchMarketPrediction(selectedPair.symbol, chartTimeframe, 'scalp')
+      setSelectedPrediction(prediction)
+    } catch (error) {
+      setPredictionError(getErrorDetail(error, 'Failed to fetch AI prediction'))
+      setSelectedPrediction(null)
+    } finally {
+      setPredictionLoading(false)
+    }
+  }, [chartTimeframe, selectedPair.symbol])
+
+  useEffect(() => {
+    void refreshPrediction()
+    const interval = setInterval(() => void refreshPrediction(), 30000)
+    return () => clearInterval(interval)
+  }, [refreshPrediction])
+
   // Clear selection when positions disappear
   useEffect(() => {
     if (selectedPositionId && !positions.find(p => getPositionRowId(p) === selectedPositionId)) {
@@ -1026,9 +1051,10 @@ function LiveTrading({
 
   // Effective active position overlay (position selection takes priority)
   const effectiveActivePosition = activePositionOverlay || selectedOrderOverlay || null
+  const predictionSignal = useMemo(() => predictionToChartSignal(selectedPrediction), [selectedPrediction])
 
   const chartOverlay = useMemo(() => {
-    const fallbackSignal = chartSignals.find((signal) => signal.symbol === selectedPair.symbol) ?? chartSignals[0] ?? null
+    const fallbackSignal = chartSignals.find((signal) => signal.symbol === selectedPair.symbol) ?? predictionSignal ?? chartSignals[0] ?? null
 
     const activePosition = positions.find((position) => position.symbol === selectedPair.symbol) ?? null
     const hasOpenPosition = Boolean(activePosition)
@@ -1150,7 +1176,7 @@ function LiveTrading({
       source: 'none' as const,
       signals: [] as ChartSignalMarker[],
     }
-  }, [chartSignals, lastAnalysis, ledgerEntries, orders, positions, selectedPair.symbol])
+  }, [chartSignals, lastAnalysis, ledgerEntries, orders, positions, predictionSignal, selectedPair.symbol])
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-[#0b0e14]">
@@ -1521,6 +1547,15 @@ function LiveTrading({
 
         {/* Positions/Orders/History Panel - Side panel on lg+, below on mobile */}
         <div className="flex flex-col lg:w-[380px] xl:w-[420px] lg:border-l border-[#1c2333] min-h-[200px] lg:min-h-0">
+          <AIPredictionPanel
+            pair={selectedPair}
+            prediction={selectedPrediction}
+            loading={predictionLoading}
+            error={predictionError}
+            compact
+            onRefresh={() => void refreshPrediction()}
+          />
+
           {/* MT5-style Tab Navigation */}
           <div className="flex border-b border-[#1c2333] bg-[#0d1117] shrink-0">
             {(['positions', 'orders', 'history'] as const).map((tab) => {
