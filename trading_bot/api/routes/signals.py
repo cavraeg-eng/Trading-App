@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 from fastapi import APIRouter, Query
 
 from trading_bot.api.models import SignalBreakdown, SignalDirection, SignalStatus
-from trading_bot.api.routes.market import (
+from trading_bot.services.market_analysis import (
     get_shared_ohlcv,
     analyze_symbol,
     compute_ai_score,

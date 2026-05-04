@@ -4,7 +4,6 @@ import asyncio
 import time
 from typing import Dict, Optional
 
-from trading_bot.api.routes.market import analyze_symbol
 from trading_bot.api.routes.paper_trading import PaperOrderRequest, place_paper_order
 from trading_bot.config import get_logger
 from trading_bot.execution.broker_base import OrderSide, OrderType
@@ -15,6 +14,7 @@ from trading_bot.services.automation_safety import (
     validate_live_risk_constraints,
     validate_signal_quality,
 )
+from trading_bot.services.market_analysis import analyze_symbol
 from trading_bot.services.strategy_registry import get_strategy
 
 logger = get_logger(__name__)

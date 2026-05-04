@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from trading_bot.api.routes.market import (
+from trading_bot.services.market_analysis import (
     ALLOWED_SYMBOLS,
     analyze_symbol,
     map_symbol_to_yf,

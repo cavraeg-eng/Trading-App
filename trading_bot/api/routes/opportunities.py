@@ -4,8 +4,8 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Query
 
-from trading_bot.api.routes.market import analyze_symbol, get_shared_ohlcv_with_metadata
 from trading_bot.config import get_logger
+from trading_bot.services.market_analysis import analyze_symbol, get_shared_ohlcv_with_metadata
 from trading_bot.services.opportunity_ranker import rank_opportunity, sort_opportunities
 
 logger = get_logger(__name__)

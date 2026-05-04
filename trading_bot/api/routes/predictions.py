@@ -39,9 +39,9 @@ from trading_bot.api.models import (
     PredictionWarningCode,
     confidence_band_for_score,
 )
-from trading_bot.api.routes.market import ALLOWED_SYMBOLS, analyze_symbol, map_symbol_to_yf
 from trading_bot.config import get_logger, get_settings
 from trading_bot.data.market_data_service import get_ohlcv_with_metadata
+from trading_bot.services.market_analysis import ALLOWED_SYMBOLS, analyze_symbol, map_symbol_to_yf
 from trading_bot.execution.broker_manager import BrokerOperationError, broker_manager
 from trading_bot.services.prediction_quality import NoTradeGate, evaluate_prediction_quality
 from trading_bot.services.trade_suggestions import generate_trade_suggestion

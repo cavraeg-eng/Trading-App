@@ -1,5 +1,19 @@
-import { useEffect, useMemo, useRef, memo, Component, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, memo, Component, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
+import {
+  CandlestickSeries,
+  ColorType,
+  CrosshairMode,
+  LineStyle,
+  createChart,
+} from 'lightweight-charts';
+import type {
+  CandlestickData,
+  IChartApi,
+  IPriceLine,
+  ISeriesApi,
+  UTCTimestamp,
+} from 'lightweight-charts';
 import type {
   ForexPair,
   ChartSignalMarker,
@@ -8,7 +22,6 @@ import type {
   TradeLevelOverlayKind,
   TradeLevelOverlayStatus,
 } from '../types';
-import { getTradingViewSymbol, getTradingViewInterval } from '../config/forexPairs';
 import { api } from '../lib/api';
 
 interface TradingChartProps {
@@ -44,6 +57,17 @@ interface CandlePoint {
   close: number;
   volume: number;
 }
+
+type PriceLineSpec = {
+  key: string;
+  price: number;
+  color: string;
+  title: string;
+  style?: LineStyle;
+  width?: 1 | 2 | 3 | 4;
+};
+
+type LiveCandle = CandlestickData<UTCTimestamp>;
 
 interface OverlayLine {
   key: string;
@@ -210,10 +234,6 @@ function formatSignedPnl(value: number) {
   return `${value >= 0 ? '+' : '-'}$${magnitude.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: fractionDigits })}`;
 }
 
-function getEmbeddableTradingViewSymbol(pair: ForexPair) {
-  return getTradingViewSymbol(pair);
-}
-
 function getSignalFeedLabel(pair: ForexPair, timeframe: string, tradeStyle: string) {
   if (pair.symbol === 'XAU/USD') {
     return `Backend XAU/USD · ${timeframe.toUpperCase()} ${tradeStyle}`;
@@ -221,14 +241,121 @@ function getSignalFeedLabel(pair: ForexPair, timeframe: string, tradeStyle: stri
   return `Backend ${pair.symbol} · ${timeframe.toUpperCase()} ${tradeStyle}`;
 }
 
-// TradingView widget internal layout offsets (px).
-// These account for the header toolbar, OHLC legend, and time axis so
-// our price-mapped overlay aligns with the chart's actual price area.
-const TV_CHART_TOP_PX = 56;   // toolbar + symbol/OHLC header
-const TV_CHART_BOTTOM_PX = 28; // time axis
-// Approximate number of candles visible in the TradingView viewport.
-// TV shows the most-recent candles that fit on screen; older candles
-// scroll out of view. Using only the tail matches TV's auto-scale range.
+function getPricePrecision(pair: ForexPair) {
+  if (pair.basePriceApprox < 10) return 5;
+  if (pair.basePriceApprox < 200) return 3;
+  return 2;
+}
+
+function toChartCandle(candle: CandlePoint): LiveCandle {
+  return {
+    time: Math.floor(candle.time) as UTCTimestamp,
+    open: candle.open,
+    high: candle.high,
+    low: candle.low,
+    close: candle.close,
+  };
+}
+
+function normalizeCandles(candles: CandlePoint[]) {
+  return [...candles]
+    .filter((candle) =>
+      Number.isFinite(candle.time)
+      && isFinitePrice(candle.open)
+      && isFinitePrice(candle.high)
+      && isFinitePrice(candle.low)
+      && isFinitePrice(candle.close)
+    )
+    .sort((a, b) => a.time - b.time)
+    .filter((candle, index, sorted) => index === sorted.length - 1 || candle.time !== sorted[index + 1].time);
+}
+
+function getBarStartSeconds(timeframe: string, nowMs = Date.now()) {
+  const durationSeconds = Math.floor((BAR_DURATION_MS[timeframe] ?? BAR_DURATION_MS['1h']) / 1000);
+  const nowSeconds = Math.floor(nowMs / 1000);
+  return nowSeconds - (nowSeconds % durationSeconds);
+}
+
+function getPriceTitle(label: string, price: number | null | undefined, formatPrice: (value: number) => string) {
+  return isFinitePrice(price) ? `${label} ${formatPrice(price)}` : label;
+}
+
+function upsertLiveQuote(candles: CandlePoint[], price: number, timeframe: string) {
+  if (!isFinitePrice(price)) return candles;
+  const barTime = getBarStartSeconds(timeframe);
+  const previous = candles[candles.length - 1];
+
+  if (!previous || previous.time < barTime) {
+    return [
+      ...candles,
+      {
+        time: barTime,
+        open: previous?.close ?? price,
+        high: price,
+        low: price,
+        close: price,
+        volume: 0,
+      },
+    ].slice(-240);
+  }
+
+  if (previous.time > barTime) return candles;
+
+  const updated = {
+    ...previous,
+    high: Math.max(previous.high, price),
+    low: Math.min(previous.low, price),
+    close: price,
+  };
+  return [...candles.slice(0, -1), updated];
+}
+
+function getAxisLabelTextColor(color: string) {
+  return color === '#4fc3f7' || color === '#66bb6a' || color === '#34d399'
+    ? '#0b0e14'
+    : '#ffffff';
+}
+
+function syncPriceLines(
+  series: ISeriesApi<'Candlestick'>,
+  existingLines: Map<string, IPriceLine>,
+  priceLineSpecs: PriceLineSpec[]
+) {
+  const nextKeys = new Set(priceLineSpecs.map((spec) => spec.key));
+
+  existingLines.forEach((line, key) => {
+    if (!nextKeys.has(key)) {
+      series.removePriceLine(line);
+      existingLines.delete(key);
+    }
+  });
+
+  priceLineSpecs.forEach((spec) => {
+    const options = {
+      price: spec.price,
+      color: spec.color,
+      lineWidth: spec.width ?? 1,
+      lineStyle: spec.style ?? LineStyle.Solid,
+      title: spec.title,
+      axisLabelVisible: true,
+      axisLabelColor: spec.color,
+      axisLabelTextColor: getAxisLabelTextColor(spec.color),
+    };
+    const current = existingLines.get(spec.key);
+    if (current) {
+      current.applyOptions(options);
+      return;
+    }
+
+    existingLines.set(spec.key, series.createPriceLine({
+      ...options,
+      lineVisible: true,
+    }));
+  });
+}
+
+const CHART_AREA_TOP_PX = 0;
+const CHART_AREA_BOTTOM_PX = 24;
 const VISIBLE_CANDLE_ESTIMATE = 80;
 
 function TradingChart({
@@ -245,15 +372,17 @@ function TradingChart({
   ghostTrade,
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const widgetRef = useRef<any>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const priceLineRefs = useRef<Map<string, IPriceLine>>(new Map());
+  const autoScrollRef = useRef(true);
+  const chartCandlesRef = useRef<CandlePoint[]>([]);
   const safeSignals = signals ?? EMPTY_TRADE_LEVELS;
 
-  // Style applied to all price-mapped overlay containers so they
-  // align with the TradingView chart area (excludes header + time axis).
   const chartAreaStyle: React.CSSProperties = {
     position: 'absolute',
-    top: TV_CHART_TOP_PX,
-    bottom: TV_CHART_BOTTOM_PX,
+    top: CHART_AREA_TOP_PX,
+    bottom: CHART_AREA_BOTTOM_PX,
     left: 0,
     right: 0,
     pointerEvents: 'none' as const,
@@ -263,8 +392,6 @@ function TradingChart({
 
   const effectiveTf = interval || timeframe;
   const resolvedTradeStyle = tradeStyle ?? inferTradeStyle(effectiveTf);
-  const tvSymbol = getEmbeddableTradingViewSymbol(pair);
-  const tvInterval = getTradingViewInterval(effectiveTf);
   const resolvedSignalTimeframe = signalTimeframe || effectiveTf;
   const resolvedSignalTradeStyle = signalTradeStyle || resolvedTradeStyle;
   const [barCloseCountdown, setBarCloseCountdown] = useState(() =>
@@ -272,9 +399,8 @@ function TradingChart({
   );
   const [candles, setCandles] = useState<CandlePoint[]>([]);
   const latestSignal = safeSignals[0];
-  const formatPrice = (value: number) => value.toFixed(
-    pair.basePriceApprox < 10 ? 5 : pair.basePriceApprox < 200 ? 3 : 2
-  );
+  const pricePrecision = getPricePrecision(pair);
+  const formatPrice = (value: number) => value.toFixed(pricePrecision);
   const signalTone =
     latestSignal?.direction === 'BUY'
       ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/15'
@@ -351,7 +477,8 @@ function TradingChart({
 
   const activeLevelLines = useMemo<OverlayLine[]>(() => {
     if (!activePosition) return [];
-    if (latestSignal?.setupStatus === 'active' || latestSignal?.setupStatus === 'pending') return [];
+    const latestSignalStatus = latestSignal ? getSignalSetupStatus(latestSignal) : null;
+    if (latestSignalStatus === 'active' || latestSignalStatus === 'pending') return [];
     const status = activePosition.status ?? 'active';
     const lines: OverlayLine[] = [];
 
@@ -384,15 +511,69 @@ function TradingChart({
     });
 
     return lines;
-  }, [activePosition, latestSignal?.setupStatus]);
+  }, [activePosition, latestSignal?.setupStatus, latestSignal?.status]);
+
+  const priceLineSpecs = useMemo<PriceLineSpec[]>(() => {
+    const specs: PriceLineSpec[] = [];
+    const addSpec = (
+      key: string,
+      price: number | null | undefined,
+      title: string,
+      color: string,
+      style: LineStyle = LineStyle.Solid,
+      width: 1 | 2 | 3 | 4 = 1
+    ) => {
+      if (!isFinitePrice(price)) return;
+      specs.push({ key, price, title, color, style, width });
+    };
+
+    overlayLines.forEach((line) => {
+      const color = line.kind === 'entry'
+        ? '#4fc3f7'
+        : line.kind === 'stop_loss'
+          ? '#ef5350'
+          : '#66bb6a';
+      addSpec(line.key, line.value, `${line.label} ${formatPrice(line.value)}`, color, line.dashed ? LineStyle.Dashed : LineStyle.Solid);
+    });
+
+    activeLevelLines.forEach((line) => {
+      const color = line.kind === 'stop_loss' ? '#ef5350' : '#66bb6a';
+      addSpec(line.key, line.value, `${line.label} ${formatPrice(line.value)}`, color, line.dashed ? LineStyle.Dashed : LineStyle.Solid);
+    });
+
+    if (activePosition) {
+      addSpec(
+        'active-entry',
+        activePosition.entryPrice,
+        `${activePosition.side === 'long' ? 'BUY' : 'SELL'} ${formatPrice(activePosition.entryPrice)}`,
+        activePosition.side === 'long' ? '#42a5f5' : '#ef5350',
+        LineStyle.Solid,
+        2
+      );
+      addSpec(
+        'active-current',
+        activePosition.currentPrice,
+        formatSignedPnl(activePosition.unrealizedPnl),
+        activePosition.unrealizedPnl >= 0 ? '#34d399' : '#ef4444',
+        LineStyle.Dashed
+      );
+    }
+
+    if (!activePosition && ghostTrade) {
+      addSpec('ghost-entry', ghostTrade.entryPrice, `Entry ${formatPrice(ghostTrade.entryPrice)}`, '#4fc3f7', LineStyle.Dashed);
+      addSpec('ghost-exit', ghostTrade.exitPrice, `Exit ${formatSignedPnl(ghostTrade.realizedPnl)}`, '#fb923c', LineStyle.Dashed);
+      addSpec('ghost-stop-loss', ghostTrade.stopLoss, getPriceTitle('SL', ghostTrade.stopLoss, formatPrice), '#ef5350', LineStyle.Dashed);
+      [ghostTrade.takeProfit1, ghostTrade.takeProfit2, ghostTrade.takeProfit3].forEach((price, index) => {
+        addSpec(`ghost-take-profit-${index + 1}`, price, getPriceTitle(`TP${index + 1}`, price, formatPrice), '#66bb6a', LineStyle.Dashed);
+      });
+    }
+
+    return specs;
+  }, [activeLevelLines, activePosition, formatPrice, ghostTrade, overlayLines]);
 
   const overlayPriceRange = useMemo(() => {
     const pricePoints: number[] = [];
 
-    // Only use the most-recent candles that approximate what TradingView
-    // actually shows on screen.  Using all 200 fetched candles includes
-    // data that has scrolled out of view, producing a much wider range
-    // than TradingView's auto-scaled viewport.
     const visibleCandles = candles.slice(-VISIBLE_CANDLE_ESTIMATE);
     visibleCandles.forEach((candle) => {
       if (isFinitePrice(candle.low)) pricePoints.push(candle.low);
@@ -439,8 +620,6 @@ function TradingChart({
     const maxPrice = Math.max(...pricePoints);
     const span = maxPrice - minPrice;
     const baseline = span > 0 ? span : Math.max(minPrice * 0.0025, 0.01);
-    // TradingView uses ~5-10% padding above/below the visible range;
-    // 8% closely matches the default auto-scale behaviour.
     const padding = baseline * 0.08;
 
     return {
@@ -455,6 +634,22 @@ function TradingChart({
     if (range <= 0) return 50;
     return clampPercent(((overlayPriceRange.max - value) / range) * 100);
   };
+
+  const applyCandlesToChart = useCallback((nextCandles: CandlePoint[]) => {
+    const series = seriesRef.current;
+    if (!series) return;
+
+    const chartData = nextCandles.map(toChartCandle);
+    chartCandlesRef.current = nextCandles;
+    series.setData(chartData);
+    if (chartData.length && autoScrollRef.current) {
+      const visibleFrom = Math.max(0, chartData.length - VISIBLE_CANDLE_ESTIMATE);
+      chartRef.current?.timeScale().setVisibleLogicalRange({
+        from: visibleFrom,
+        to: chartData.length + 8,
+      });
+    }
+  }, []);
 
   useEffect(() => {
     const updateCountdown = () => {
@@ -473,7 +668,7 @@ function TradingChart({
       try {
         const data = await api.fetchCandles(pair.symbol, effectiveTf, 200, resolvedTradeStyle);
         if (!cancelled) {
-          setCandles(data.candles ?? []);
+          setCandles(normalizeCandles(data.candles ?? []));
         }
       } catch {
         if (!cancelled) {
@@ -482,8 +677,48 @@ function TradingChart({
       }
     };
 
+    setCandles([]);
+    applyCandlesToChart([]);
+    chartCandlesRef.current = [];
+    autoScrollRef.current = true;
     void fetchCandles();
-    const intervalId = window.setInterval(() => void fetchCandles(), 30_000);
+    const intervalId = window.setInterval(() => void fetchCandles(), 15_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [applyCandlesToChart, effectiveTf, pair.symbol, resolvedTradeStyle]);
+
+  useEffect(() => {
+    applyCandlesToChart(candles);
+  }, [applyCandlesToChart, candles]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+
+    const fetchQuote = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const quote = await api.fetchQuote(pair.symbol, effectiveTf, resolvedTradeStyle);
+        if (cancelled || !isFinitePrice(quote.currentPrice)) return;
+
+        const updatedCandles = upsertLiveQuote(chartCandlesRef.current, quote.currentPrice, effectiveTf);
+        const latestCandle = updatedCandles[updatedCandles.length - 1];
+        chartCandlesRef.current = updatedCandles;
+        if (latestCandle) {
+          seriesRef.current?.update(toChartCandle(latestCandle));
+        }
+      } catch {
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void fetchQuote();
+    const intervalId = window.setInterval(() => void fetchQuote(), 2_000);
 
     return () => {
       cancelled = true;
@@ -492,104 +727,100 @@ function TradingChart({
   }, [effectiveTf, pair.symbol, resolvedTradeStyle]);
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    const series = seriesRef.current;
+    if (!series) return;
 
-    // Guard against StrictMode double-invocation: if the effect cleanup
-    // runs before the async script loads, `cancelled` prevents the stale
-    // closure from creating a second widget.
-    let cancelled = false;
+    syncPriceLines(series, priceLineRefs.current, priceLineSpecs);
+  }, [priceLineSpecs]);
 
-    // Clear previous widget
+  useEffect(() => {
     const container = containerRef.current;
-    container.innerHTML = '';
+    if (!container) return;
 
-    // Load TradingView widget script if not already loaded
-    const scriptId = 'tradingview-widget-script';
-    let script = document.getElementById(scriptId) as HTMLScriptElement | null;
-
-    const createWidget = () => {
-      if (cancelled) return;
-      if (!containerRef.current || !(window as any).TradingView) return;
-
-      // Create a unique container ID
-      const containerId = `tv-chart-${Date.now()}`;
-      const widgetContainer = document.createElement('div');
-      widgetContainer.id = containerId;
-      widgetContainer.style.width = '100%';
-      widgetContainer.style.height = '100%';
-      containerRef.current.appendChild(widgetContainer);
-
-      widgetRef.current = new (window as any).TradingView.widget({
-        container_id: containerId,
-        symbol: tvSymbol,
-        interval: tvInterval,
-        timezone: 'Etc/UTC',
-        theme: 'dark',
-        style: '1', // Candlestick
-        locale: 'en',
-        toolbar_bg: '#0b0e14',
-        enable_publishing: false,
-        allow_symbol_change: false,
-        hide_top_toolbar: false,
-        hide_legend: false,
-        save_image: false,
-        autosize: true,
-        backgroundColor: '#0b0e14',
-        gridColor: '#161b26',
-        studies_overrides: {},
-        overrides: {
-          'mainSeriesProperties.showCountdown': true,
-          'mainSeriesProperties.candleStyle.upColor': '#26a69a',
-          'mainSeriesProperties.candleStyle.downColor': '#ef5350',
-          'mainSeriesProperties.candleStyle.borderUpColor': '#26a69a',
-          'mainSeriesProperties.candleStyle.borderDownColor': '#ef5350',
-          'mainSeriesProperties.candleStyle.wickUpColor': '#26a69a',
-          'mainSeriesProperties.candleStyle.wickDownColor': '#ef5350',
-          'paneProperties.background': '#0b0e14',
-          'paneProperties.backgroundType': 'solid',
-          'paneProperties.vertGridProperties.color': '#161b26',
-          'paneProperties.horzGridProperties.color': '#161b26',
-          'scalesProperties.textColor': '#5c6a7e',
-          'scalesProperties.lineColor': '#161b26',
+    const precision = pricePrecision;
+    const minMove = 1 / 10 ** precision;
+    const chart = createChart(container, {
+      autoSize: true,
+      layout: {
+        background: { type: ColorType.Solid, color: '#0b0e14' },
+        textColor: '#5c6a7e',
+        fontSize: 11,
+        fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+      },
+      grid: {
+        vertLines: { color: '#161b26', style: LineStyle.Solid, visible: true },
+        horzLines: { color: '#161b26', style: LineStyle.Solid, visible: true },
+      },
+      rightPriceScale: {
+        borderVisible: false,
+        textColor: '#7b8798',
+      },
+      timeScale: {
+        borderVisible: false,
+        timeVisible: true,
+        secondsVisible: effectiveTf === '1m',
+        rightOffset: 8,
+        barSpacing: 7,
+        minBarSpacing: 3,
+      },
+      crosshair: {
+        mode: CrosshairMode.MagnetOHLC,
+        vertLine: {
+          color: '#4fc3f7',
+          labelBackgroundColor: '#1f2937',
+          style: LineStyle.Dashed,
+          visible: true,
         },
-        loading_screen: { backgroundColor: '#0b0e14', foregroundColor: '#4fc3f7' },
-        disabled_features: [
-          'use_localstorage_for_settings',
-          'header_symbol_search',
-          'header_compare',
-        ],
-        enabled_features: [
-          'countdown',
-          'hide_left_toolbar_by_default',
-        ],
-      });
-    };
+        horzLine: {
+          color: '#4fc3f7',
+          labelBackgroundColor: '#1f2937',
+          style: LineStyle.Dashed,
+          visible: true,
+        },
+      },
+      handleScroll: true,
+      handleScale: true,
+    });
 
-    if (script && (window as any).TradingView) {
-      createWidget();
-    } else if (!script) {
-      script = document.createElement('script');
-      script.id = scriptId;
-      script.src = 'https://s3.tradingview.com/tv.js';
-      script.async = true;
-      script.onload = createWidget;
-      document.head.appendChild(script);
-    } else {
-      // Script exists but TradingView not loaded yet — wait
-      script.addEventListener('load', createWidget);
-    }
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: '#26a69a',
+      downColor: '#ef5350',
+      borderUpColor: '#26a69a',
+      borderDownColor: '#ef5350',
+      wickUpColor: '#26a69a',
+      wickDownColor: '#ef5350',
+      priceLineVisible: true,
+      priceLineColor: '#d1d5db',
+      priceLineStyle: LineStyle.Dashed,
+      priceFormat: {
+        type: 'price',
+        precision,
+        minMove,
+      },
+    });
+
+    chartRef.current = chart;
+    seriesRef.current = series;
+    priceLineRefs.current = new Map();
+
+    chartCandlesRef.current = [];
+    autoScrollRef.current = true;
+    series.setData([]);
+    syncPriceLines(series, priceLineRefs.current, priceLineSpecs);
+    const visibleRangeSubscription = () => {
+      autoScrollRef.current = chart.timeScale().scrollPosition() <= 10;
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(visibleRangeSubscription);
 
     return () => {
-      cancelled = true;
-      if (widgetRef.current && typeof widgetRef.current.remove === 'function') {
-        try { widgetRef.current.remove(); } catch {}
-      }
-      widgetRef.current = null;
-      if (containerRef.current) {
-        containerRef.current.innerHTML = '';
-      }
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(visibleRangeSubscription);
+      priceLineRefs.current.forEach((line) => series.removePriceLine(line));
+      priceLineRefs.current.clear();
+      seriesRef.current = null;
+      chartRef.current = null;
+      chart.remove();
     };
-  }, [tvSymbol, tvInterval]);
+  }, [effectiveTf, pair.symbol, pricePrecision]);
 
   return (
     <div className="relative w-full h-full min-h-[400px]">
@@ -791,7 +1022,7 @@ function TradingChart({
       )}
       <div className="pointer-events-none absolute bottom-2 right-2 z-20 max-w-[70%] rounded bg-[#0b0e14]/85 px-2 py-1 text-right text-[9px] text-slate-400 backdrop-blur-sm">
         <div>
-          Chart feed: <span className="text-slate-200">{tvSymbol}</span>
+          Chart feed: <span className="text-slate-200">{pair.symbol} · {effectiveTf.toUpperCase()} {resolvedTradeStyle}</span>
         </div>
         <div>
           Signal feed: <span className="text-slate-200">{getSignalFeedLabel(pair, resolvedSignalTimeframe, resolvedSignalTradeStyle)}</span>
