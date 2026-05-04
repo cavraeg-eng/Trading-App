@@ -511,7 +511,7 @@ function TradingChart({
     });
 
     return lines;
-  }, [activePosition, latestSignal?.setupStatus]);
+  }, [activePosition, latestSignal?.setupStatus, latestSignal?.status]);
 
   const priceLineSpecs = useMemo<PriceLineSpec[]>(() => {
     const specs: PriceLineSpec[] = [];
