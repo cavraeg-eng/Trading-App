@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from trading_bot.api.routes.market import (
+from trading_bot.services.market_analysis import (
     map_symbol_to_yf,
     calculate_rsi,
     calculate_macd,

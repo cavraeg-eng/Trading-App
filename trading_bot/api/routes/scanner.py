@@ -16,10 +16,10 @@ from trading_bot.api.models import (
     PredictionStrategyMode,
     ScannerConfig,
 )
-from trading_bot.api.routes.market import analyze_symbol
 from trading_bot.api.routes.predictions import _asset_class_for_symbol, build_prediction_response
 from trading_bot.config import get_logger, get_settings
 from trading_bot.data.market_data_service import get_ohlcv_with_metadata
+from trading_bot.services.market_analysis import analyze_symbol
 from trading_bot.monitoring.bot_metrics import bot_metrics
 from trading_bot.persistence import repositories as repo
 from trading_bot.services.opportunity_ranker import rank_opportunity
