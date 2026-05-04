@@ -26,7 +26,9 @@ import type {
   PredictionAssetClass,
   PredictionResponse,
   PredictionStrategyMode,
+  AIPrediction,
 } from '../types';
+import { normalizePredictionPayload } from './predictionPresentation';
 
 const BASE = '';  // relative — Vite proxy forwards /api/* to the backend
 
@@ -554,6 +556,12 @@ export const api = {
     });
     if (tradeStyle) params.set('trade_style', tradeStyle);
     return request(`/api/market/candles/${encodeURIComponent(symbol)}?${params.toString()}`);
+  },
+
+  fetchMarketPrediction(symbol: string, timeframe: string, tradeStyle: string): Promise<AIPrediction> {
+    const params = new URLSearchParams({ timeframe, trade_style: tradeStyle });
+    return request<Record<string, unknown>>(`/api/market/analysis/${encodeURIComponent(symbol)}?${params.toString()}`)
+      .then((payload) => normalizePredictionPayload(payload, symbol));
   },
 
   fetchCopyTradingSettings(): Promise<CopyTradingSettings> {

@@ -96,6 +96,7 @@ export interface ScannerConfig {
 export interface ScanResult {
   symbol: string;
   signal?: string;
+  recommendation?: string;
   score: number;
   matching_conditions: string[];
   indicator_values: Record<string, number>;
@@ -107,15 +108,18 @@ export interface ScanResult {
   source_score?: number;
   source_metadata?: SourceMetadata;
   reason?: string;
-  entry_range?: { min: number; max: number };
-  stop_loss?: number;
-  take_profit1?: number;
-  take_profit2?: number;
-  take_profit3?: number;
-  current_price?: number;
+  entry_range?: { min: number; max: number } | null;
+  stop_loss?: number | null;
+  take_profit1?: number | null;
+  take_profit2?: number | null;
+  take_profit3?: number | null;
+  current_price?: number | null;
   risk_gate?: 'low' | 'medium' | 'high';
   risk_context?: { volatility_regime: string; market_status: string };
   atr?: number;
+  risk_reward?: number | null;
+  data_fetched_at?: number | null;
+  warnings?: string[];
   scan_status?: 'matched' | 'warning' | 'error';
   error_message?: string;
   evaluation_latency_ms?: number;
@@ -340,6 +344,37 @@ export interface PredictionResponse {
   chart: PredictionChartOverlay;
   suggestion_card: PredictionSuggestionCard;
   generated_at: string;
+}
+
+export type AIPredictionRecommendation = 'BUY' | 'SELL' | 'HOLD' | 'NO_TRADE' | 'NEUTRAL';
+
+export interface PredictionSetupLevels {
+  entry?: number | null;
+  entryMin?: number | null;
+  entryMax?: number | null;
+  stopLoss?: number | null;
+  takeProfit1?: number | null;
+  takeProfit2?: number | null;
+  takeProfit3?: number | null;
+  riskReward?: number | null;
+}
+
+export interface AIPrediction {
+  symbol: string;
+  recommendation: AIPredictionRecommendation | string;
+  confidence: number;
+  timeframe?: string;
+  tradeStyle?: string;
+  marketRegime?: string;
+  rationale?: string;
+  warnings: string[];
+  generatedAt?: string;
+  dataFetchedAt?: number | null;
+  source?: string;
+  sourceMetadata?: SourceMetadata | null;
+  currentPrice?: number | null;
+  setup: PredictionSetupLevels;
+  predictionSource?: string;
 }
 
 export interface GoldContextData {

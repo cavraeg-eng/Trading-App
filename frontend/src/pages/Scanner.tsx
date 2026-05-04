@@ -17,6 +17,8 @@ import {
   Search,
   SlidersHorizontal,
   Sparkles,
+  ShieldAlert,
+  Target,
 } from 'lucide-react'
 import ScannerBuilder from '../components/ScannerBuilder'
 import ScannerPresets from '../components/ScannerPresets'
@@ -26,6 +28,16 @@ import { SimpleToastContainer, useSimpleToast } from '../components/AlertToast'
 import { useScanner } from '../hooks/useScanner'
 import { ALL_FOREX_PAIRS } from '../config/forexPairs'
 import type { ForexPair, ScannerTimeframe } from '../types'
+import {
+  confidenceToneClass,
+  hasPredictionSetupLevels,
+  isActionablePrediction,
+  isNoTradePrediction,
+  isPredictionStale,
+  normalizePredictionFromScanResult,
+  normalizeRecommendation,
+  predictionToneClass,
+} from '../lib/predictionPresentation'
 
 interface ScannerProps {
   onPairChange?: (pair: ForexPair) => void
@@ -61,6 +73,14 @@ function signalBg(signal?: string) {
   if (s === 'BUY') return 'bg-trading-buy/15 text-emerald-300 border-trading-buy/30'
   if (s === 'SELL') return 'bg-trading-sell/15 text-red-300 border-trading-sell/30'
   return 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+}
+
+function formatResultPrice(pair: ForexPair | undefined, value?: number | null) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '—'
+  const base = pair?.basePriceApprox ?? value
+  if (base < 10) return value.toFixed(5)
+  if (base < 200) return value.toFixed(3)
+  return value.toFixed(2)
 }
 
 function scoreBar(score: number) {
@@ -636,6 +656,11 @@ export default function Scanner({
                   const isMenuOpen = openMenuId === resultKey
                   const showIndicators = expandedIndicators.has(resultKey)
                   const isError = result.scan_status === 'error'
+                  const prediction = normalizePredictionFromScanResult(result)
+                  const recommendation = normalizeRecommendation(prediction.recommendation)
+                  const actionable = isActionablePrediction(prediction)
+                  const stale = isPredictionStale(prediction)
+                  const noTrade = isNoTradePrediction(prediction)
 
                   return (
                     <div key={resultKey} className={`px-4 py-3 transition-colors hover:bg-trading-bg/30 ${isError ? 'bg-rose-500/5' : ''}`}>
@@ -648,6 +673,11 @@ export default function Scanner({
                             {!isError ? (
                               <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${signalBg(result.signal)}`}>
                                 {result.signal || 'NEUTRAL'}
+                              </span>
+                            ) : null}
+                            {!isError ? (
+                              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${predictionToneClass(prediction)}`}>
+                                AI {recommendation === 'NO_TRADE' ? 'NO TRADE' : recommendation}
                               </span>
                             ) : null}
                             {isError ? (
@@ -731,7 +761,16 @@ export default function Scanner({
                           Opp: {Math.round(result.opportunity_score || 0)}%
                         </span>
                         <span className="rounded-md bg-trading-bg px-2 py-0.5 text-[10px] font-medium text-trading-text">
-                          Conf: {Math.round(result.confidence || 0)}%
+                          Conf: <span className={confidenceToneClass(prediction.confidence)}>{Math.round(prediction.confidence)}%</span>
+                        </span>
+                        <span className={`rounded-md px-2 py-0.5 text-[10px] font-medium ${
+                          actionable
+                            ? 'bg-emerald-500/10 text-emerald-300'
+                            : stale || noTrade
+                              ? 'bg-amber-500/10 text-amber-200'
+                              : 'bg-trading-bg text-trading-muted'
+                        }`}>
+                          {actionable ? 'Actionable setup' : stale ? 'Stale data' : noTrade ? 'No trade' : 'Watch only'}
                         </span>
                         <span className="rounded-md bg-trading-bg px-2 py-0.5 text-[10px] font-medium text-trading-text">
                           Vol: {(result.indicator_values?.Volume || 0).toFixed(1)}x
@@ -775,38 +814,37 @@ export default function Scanner({
                         ) : null}
                       </div>
 
-                      {/* Row 2b: Actionable trade levels */}
-                      {result.entry_range || result.stop_loss || result.take_profit1 ? (
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          {result.entry_range ? (
-                            <span className="rounded-md border border-trading-border bg-trading-bg px-2 py-0.5 text-[10px] text-trading-text">
-                              Entry: {result.entry_range.min} – {result.entry_range.max}
-                            </span>
-                          ) : null}
-                          {result.stop_loss ? (
-                            <span className="rounded-md border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-300">
-                              SL: {result.stop_loss}
-                            </span>
-                          ) : null}
-                          {result.take_profit1 ? (
-                            <span className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-300">
-                              TP1: {result.take_profit1}
-                            </span>
-                          ) : null}
-                          {result.take_profit2 ? (
-                            <span className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-300">
-                              TP2: {result.take_profit2}
-                            </span>
-                          ) : null}
-                          {result.take_profit3 ? (
-                            <span className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-300">
-                              TP3: {result.take_profit3}
-                            </span>
-                          ) : null}
-                          {result.current_price ? (
-                            <span className="rounded-md bg-trading-bg px-2 py-0.5 text-[10px] text-trading-muted">
-                              Price: {result.current_price}
-                            </span>
+                      {(hasPredictionSetupLevels(prediction) || prediction.warnings.length > 0 || prediction.rationale) ? (
+                        <div className="mt-2 rounded-lg border border-[#1c2333] bg-trading-bg/70 p-2.5">
+                          <div className="grid gap-2 text-[10px] sm:grid-cols-4">
+                            <div>
+                              <div className="flex items-center gap-1 uppercase tracking-wide text-trading-muted"><Target size={10} /> Entry</div>
+                              <div className="mt-0.5 font-semibold text-blue-300 tabular-nums">
+                                {prediction.setup.entryMin && prediction.setup.entryMax
+                                  ? `${formatResultPrice(pair, prediction.setup.entryMin)}–${formatResultPrice(pair, prediction.setup.entryMax)}`
+                                  : formatResultPrice(pair, prediction.setup.entry)}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="uppercase tracking-wide text-trading-muted">Stop</div>
+                              <div className="mt-0.5 font-semibold text-red-300 tabular-nums">{formatResultPrice(pair, prediction.setup.stopLoss)}</div>
+                            </div>
+                            <div>
+                              <div className="uppercase tracking-wide text-trading-muted">Take profit</div>
+                              <div className="mt-0.5 font-semibold text-emerald-300 tabular-nums">{formatResultPrice(pair, prediction.setup.takeProfit1)}</div>
+                            </div>
+                            <div>
+                              <div className="uppercase tracking-wide text-trading-muted">R/R</div>
+                              <div className="mt-0.5 font-semibold text-trading-text tabular-nums">
+                                {prediction.setup.riskReward ? `${prediction.setup.riskReward.toFixed(2)}R` : '—'}
+                              </div>
+                            </div>
+                          </div>
+                          {prediction.warnings.length > 0 ? (
+                            <div className="mt-2 flex items-start gap-1.5 text-[10px] text-amber-200">
+                              <ShieldAlert size={11} className="mt-0.5 shrink-0" />
+                              <span>{prediction.warnings.slice(0, 2).join(' · ')}</span>
+                            </div>
                           ) : null}
                         </div>
                       ) : null}
