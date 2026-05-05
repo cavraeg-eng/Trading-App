@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
     init_db(db_path)
     print(f"SQLite database initialized at {db_path.resolve()}")
     from trading_bot.execution.broker_manager import broker_manager
-    from trading_bot.api.routes.paper_trading import restore_paper_trading_state
+    from trading_bot.execution.paper import restore_paper_trading_state
 
     try:
         restore_paper_trading_state()
