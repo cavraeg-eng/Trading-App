@@ -1170,4 +1170,3 @@ def get_prediction_cache_info() -> dict[str, Any]:
             "oldest_entry_age_s": max(ages) if ages else None,
             "feature_version": PREDICTION_FEATURE_VERSION,
         }
-

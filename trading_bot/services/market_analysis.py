@@ -1169,6 +1169,7 @@ def build_market_analysis(
         "data_fetched_at": time.time(),
         "is_mock": False,
         "source": "live",
+        "sourceMetadata": metadata,
     }
 
 
