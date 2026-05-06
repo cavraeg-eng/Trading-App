@@ -122,6 +122,26 @@ def test_cycle_returns_explicit_no_trade_skip_without_worker_loop():
     assert result.events[-1].detail["noTradeReason"] == "low_confidence"
 
 
+def test_cycle_skips_hold_prediction_after_directional_signal_quality_passes():
+    placed_orders = []
+    deps = AutomationCycleDependencies(
+        repository=FakeRepository(),
+        strategy_provider=_strategy,
+        analysis_provider=lambda symbol, timeframe, trade_style: _analysis(signal="strong_buy"),
+        prediction_provider=lambda request, analysis: FakePrediction(PredictionRecommendation.HOLD),
+        paper_order_executor=placed_orders.append,
+        live_gate_validator=lambda **kwargs: AutomationGateResult(True),
+        clock=lambda: 1_700_000_100.0,
+    )
+
+    result = asyncio.run(run_automation_cycle(AutomationCycleContext(mode="paper"), deps))
+
+    assert placed_orders == []
+    assert result.events[-1].status == "skipped"
+    assert result.events[-1].detail["reason"] == "prediction_not_actionable"
+    assert result.events[-1].detail["recommendation"] == "hold"
+
+
 def test_cycle_executes_paper_trade_through_paper_seam():
     placed_orders = []
 

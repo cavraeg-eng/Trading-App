@@ -167,7 +167,7 @@ def _build_prediction(request: PredictionRequest, analysis: dict[str, Any]) -> A
 
 def _prediction_blocks_trade(prediction: Any) -> bool:
     recommendation = getattr(prediction, "recommendation", None)
-    if recommendation == PredictionRecommendation.NO_TRADE:
+    if recommendation not in {PredictionRecommendation.BUY, PredictionRecommendation.SELL}:
         return True
     return getattr(prediction, "trade_allowed", True) is False
 
@@ -178,9 +178,15 @@ def _prediction_skip_detail(prediction: Any) -> dict[str, Any]:
         code = getattr(detail, "code", detail)
         no_trade_reasons.append(getattr(code, "value", str(code)))
     primary = getattr(prediction, "no_trade_reason", None)
+    recommendation = getattr(prediction, "recommendation", None)
+    reason = (
+        "prediction_no_trade"
+        if recommendation == PredictionRecommendation.NO_TRADE
+        else "prediction_not_actionable"
+    )
     return {
-        "reason": "prediction_no_trade",
-        "recommendation": getattr(getattr(prediction, "recommendation", None), "value", None),
+        "reason": reason,
+        "recommendation": getattr(recommendation, "value", str(recommendation)),
         "noTradeReason": getattr(primary, "value", str(primary)) if primary else None,
         "noTradeReasons": no_trade_reasons,
         "tradeAllowed": getattr(prediction, "trade_allowed", None),
