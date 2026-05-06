@@ -10,6 +10,7 @@ from trading_bot.services.automation_cycle import (
     run_automation_cycle,
 )
 from trading_bot.services.automation_safety import AutomationGateResult
+from trading_bot.services.prediction_pipeline import clear_prediction_cache
 
 
 class FakeRepository:
@@ -140,6 +141,43 @@ def test_cycle_skips_hold_prediction_after_directional_signal_quality_passes():
     assert result.events[-1].status == "skipped"
     assert result.events[-1].detail["reason"] == "prediction_not_actionable"
     assert result.events[-1].detail["recommendation"] == "hold"
+
+
+def test_cycle_preserves_stale_source_metadata_for_prediction_gate():
+    clear_prediction_cache()
+    placed_orders = []
+
+    async def place_order(order):
+        placed_orders.append(order)
+        return {"success": True, "order_id": "paper-1"}
+
+    deps = AutomationCycleDependencies(
+        repository=FakeRepository(),
+        strategy_provider=_strategy,
+        analysis_provider=lambda symbol, timeframe, trade_style: _analysis(
+            atr=0.002,
+            riskReward=2.0,
+            sourceMetadata={
+                "sourceName": "fixture",
+                "sourceType": "fixture",
+                "priceSource": "fixture",
+                "qualityFlags": ["stale_data"],
+                "freshnessSeconds": 9999,
+                "marketStatus": "stale",
+                "lastBarTimestamp": 1_700_000_001,
+            },
+        ),
+        paper_order_executor=place_order,
+        live_gate_validator=lambda **kwargs: AutomationGateResult(True),
+        clock=lambda: 1_700_000_100.0,
+    )
+
+    result = asyncio.run(run_automation_cycle(AutomationCycleContext(mode="paper"), deps))
+
+    assert placed_orders == []
+    assert result.events[-1].status == "skipped"
+    assert result.events[-1].detail["reason"] == "prediction_no_trade"
+    assert result.events[-1].detail["noTradeReason"] == "stale_data"
 
 
 def test_cycle_executes_paper_trade_through_paper_seam():

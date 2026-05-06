@@ -148,16 +148,15 @@ def _strategy_mode(trade_style: str) -> PredictionStrategyMode:
 
 
 def _build_prediction(request: PredictionRequest, analysis: dict[str, Any]) -> Any:
-    metadata = {
-        "sourceName": "automation_cycle",
-        "sourceType": "service",
-        "priceSource": "analysis",
-        "isFallback": bool(analysis.get("is_mock", False)),
-        "freshnessSeconds": 0,
-        "qualityFlags": [],
-        "marketStatus": "open",
-        "lastBarTimestamp": analysis.get("data_fetched_at") or time.time(),
-    }
+    metadata = dict(analysis.get("sourceMetadata") or {})
+    metadata.setdefault("sourceName", "automation_cycle")
+    metadata.setdefault("sourceType", "service")
+    metadata.setdefault("priceSource", "analysis")
+    metadata.setdefault("isFallback", bool(analysis.get("is_mock", False)))
+    metadata.setdefault("freshnessSeconds", 0)
+    metadata.setdefault("qualityFlags", [])
+    metadata.setdefault("marketStatus", "open")
+    metadata.setdefault("lastBarTimestamp", analysis.get("data_fetched_at") or time.time())
     return build_prediction_response(
         request,
         analysis_override=analysis,
