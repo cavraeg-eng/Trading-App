@@ -5,7 +5,7 @@ import time
 from fastapi.testclient import TestClient
 
 from trading_bot.api.server import app
-from trading_bot.api.routes import scanner
+from trading_bot.services import scanner_run
 from trading_bot.persistence.db import init_db
 
 
@@ -142,8 +142,8 @@ def test_scan_returns_partial_errors_and_scan_metadata(monkeypatch):
             "reason": "Matched scanner conditions.",
         }
 
-    monkeypatch.setattr(scanner, "evaluate_single_pair", fake_evaluate)
-    monkeypatch.setattr(scanner, "get_scanner_concurrency_limit", lambda total_symbols=None: 2)
+    monkeypatch.setattr(scanner_run, "evaluate_single_pair", fake_evaluate)
+    monkeypatch.setattr(scanner_run, "get_scanner_concurrency_limit", lambda total_symbols=None: 2)
 
     response = client.post(
         "/api/scanner/scan",
@@ -197,8 +197,8 @@ def test_scan_respects_configured_concurrency(monkeypatch):
             "reason": "Matched scanner conditions.",
         }
 
-    monkeypatch.setattr(scanner, "evaluate_single_pair", fake_evaluate)
-    monkeypatch.setattr(scanner, "get_scanner_concurrency_limit", lambda total_symbols=None: 2)
+    monkeypatch.setattr(scanner_run, "evaluate_single_pair", fake_evaluate)
+    monkeypatch.setattr(scanner_run, "get_scanner_concurrency_limit", lambda total_symbols=None: 2)
 
     response = client.post(
         "/api/scanner/scan",
