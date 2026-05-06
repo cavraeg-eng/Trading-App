@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from trading_bot.config import get_logger
-from trading_bot.persistence import repositories as repo
+from trading_bot.persistence import paper_trading as repo
 from trading_bot.persistence.db import PersistenceError
 from trading_bot.risk.manager import Position, RiskManager
 from trading_bot.strategy.base import Signal, SignalType

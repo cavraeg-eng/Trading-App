@@ -5,7 +5,7 @@ import time
 from typing import Dict, Optional
 
 from trading_bot.config import get_logger
-from trading_bot.persistence import repositories as repo
+from trading_bot.persistence import automation as repo
 from trading_bot.services.automation_cycle import AutomationCycleContext, run_automation_cycle
 
 logger = get_logger(__name__)

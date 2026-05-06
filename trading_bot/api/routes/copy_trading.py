@@ -15,7 +15,8 @@ from trading_bot.api.routes.signals import (
     TIMEFRAME_SECONDS,
     get_base_price,
 )
-from trading_bot.persistence import repositories as repo
+from trading_bot.persistence import copy_trading as repo
+from trading_bot.persistence import signals as signal_repo
 
 router = APIRouter(prefix="/api/copy-trading", tags=["copy_trading"])
 
@@ -397,7 +398,7 @@ async def copy_signal(body: CopySignalRequest):
 
     if not settings["enabled"]:
         raise HTTPException(status_code=400, detail="Copy trading is not enabled.")
-    signal = repo.get_signal_prediction(body.signal_id)
+    signal = signal_repo.get_signal_prediction(body.signal_id)
     if not signal:
         raise HTTPException(status_code=404, detail=f"Signal {body.signal_id} not found.")
     if signal["direction"] == "HOLD":

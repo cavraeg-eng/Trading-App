@@ -10,7 +10,7 @@ from trading_bot.execution.paper import (
     PaperOrderCommand,
     PaperOrderValidationError,
 )
-from trading_bot.persistence import repositories as repo
+from trading_bot.persistence import paper_trading as repo
 from trading_bot.persistence.db import PersistenceError, init_db
 
 
