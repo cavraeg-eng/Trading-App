@@ -17,7 +17,7 @@ from trading_bot.services.market_analysis import (
     get_shared_ohlcv_with_metadata,
 )
 from trading_bot.config import get_logger
-from trading_bot.persistence import repositories as repo
+from trading_bot.persistence import signals as repo
 
 logger = get_logger(__name__)
 

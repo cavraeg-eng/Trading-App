@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from trading_bot.api.models import OrderRequest
 from trading_bot.execution.broker_base import OrderSide, OrderType
 from trading_bot.execution.broker_manager import BrokerOperationError, broker_manager
-from trading_bot.persistence import repositories as repo
+from trading_bot.persistence import trade_ledger as repo
 
 router = APIRouter(prefix="/api/broker", tags=["broker"])
 

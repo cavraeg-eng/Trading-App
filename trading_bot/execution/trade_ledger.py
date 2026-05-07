@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Optional, Union
 
 from trading_bot.execution.broker_base import BrokerOrder, BrokerPosition, OrderStatus
-from trading_bot.persistence import repositories as repo
+from trading_bot.persistence import trade_ledger as repo
 
 
 OPEN_ORDER_STATUSES = {

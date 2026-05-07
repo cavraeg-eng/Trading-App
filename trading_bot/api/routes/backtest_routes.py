@@ -18,7 +18,7 @@ from trading_bot.services.market_analysis import (
 )
 from trading_bot.data.market_data_service import fetch_yf_historical
 from trading_bot.config import get_logger
-from trading_bot.persistence import repositories as repo
+from trading_bot.persistence import paper_trading as repo
 
 logger = get_logger(__name__)
 

@@ -15,7 +15,7 @@ from trading_bot.data.market_data_service import (
     get_ohlcv_with_metadata,
 )
 from trading_bot.monitoring.bot_metrics import bot_metrics, classify_no_trade_reason
-from trading_bot.persistence import repositories as repo
+from trading_bot.persistence import signals as repo
 
 logger = get_logger(__name__)
 

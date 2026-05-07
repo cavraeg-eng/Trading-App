@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from trading_bot.persistence import repositories as repo
+from trading_bot.persistence import alerts as repo
 
 logger = logging.getLogger(__name__)
 

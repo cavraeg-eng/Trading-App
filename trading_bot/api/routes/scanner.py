@@ -5,7 +5,8 @@ import json
 from fastapi import APIRouter, HTTPException
 
 from trading_bot.api.models import ScannerConfig
-from trading_bot.persistence import repositories as repo
+from trading_bot.persistence import alerts as alert_repo
+from trading_bot.persistence import scanners as scanner_repo
 from trading_bot.services.scanner_engine import (
     metadata_payload,
 )
@@ -272,21 +273,21 @@ async def run_scan(config: ScannerConfig):
 
 @router.get("/saved")
 async def get_saved_scanners():
-    return {"saved": repo.get_saved_scanners()}
+    return {"saved": scanner_repo.get_saved_scanners()}
 
 
 @router.post("/save")
 async def save_scanner(config: ScannerConfig):
     """Save a scanner configuration."""
     scanner_payload = config.model_dump() if hasattr(config, "model_dump") else config.dict()
-    scanner_id = repo.save_scanner(config.name, scanner_payload)
+    scanner_id = scanner_repo.save_scanner(config.name, scanner_payload)
     return {"status": "saved", "name": config.name, "id": scanner_id}
 
 
 @router.put("/saved/{scanner_id}")
 async def update_saved_scanner(scanner_id: int, config: ScannerConfig):
     scanner_payload = config.model_dump() if hasattr(config, "model_dump") else config.dict()
-    updated = repo.update_scanner(scanner_id, config.name, scanner_payload)
+    updated = scanner_repo.update_scanner(scanner_id, config.name, scanner_payload)
     if not updated:
         raise HTTPException(status_code=404, detail="Saved scanner not found")
     return {"status": "updated", "id": scanner_id, "name": config.name}
@@ -294,7 +295,7 @@ async def update_saved_scanner(scanner_id: int, config: ScannerConfig):
 
 @router.delete("/saved/{scanner_id}")
 async def delete_saved_scanner(scanner_id: int):
-    deleted = repo.delete_scanner(scanner_id)
+    deleted = scanner_repo.delete_scanner(scanner_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Saved scanner not found")
     return {"status": "deleted", "id": scanner_id}
@@ -306,7 +307,7 @@ async def create_scanner_alert(config: ScannerConfig):
     if not conditions:
         raise HTTPException(status_code=400, detail="Scanner alert requires at least one condition")
     symbol_scope = ", ".join((config.pairs or DEFAULT_PAIRS)[:6])
-    alert_id = repo.create_alert(
+    alert_id = alert_repo.create_alert(
         symbol=(config.pairs or ["SCAN"])[0],
         alert_type="SCANNER_MATCH",
         title=f"Scanner alert armed: {config.name}",
