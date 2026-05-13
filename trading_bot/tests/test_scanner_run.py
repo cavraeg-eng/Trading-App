@@ -44,6 +44,7 @@ def test_scan_action_blocks_missing_or_zero_risk_reward():
         "signal": "buy",
         "confidence": 72,
         "currentPrice": 117,
+        "entryRange": {"min": 116.5, "max": 117},
         "stopLoss": 115,
         "takeProfit1": 120,
     }
@@ -71,6 +72,41 @@ def test_scan_action_blocks_missing_or_zero_risk_reward():
         assert "Risk/reward is unavailable" in action["blockers"]
 
 
+def test_scan_action_blocks_risk_reasons_and_missing_entry():
+    base_analysis = {
+        "signal": "buy",
+        "confidence": 72,
+        "currentPrice": 117,
+        "stopLoss": 115,
+        "takeProfit1": 120,
+        "riskReward": 1.5,
+    }
+
+    stale_action = scanner_run.build_scan_action(
+        "buy",
+        72,
+        "medium",
+        ["Market data is stale"],
+        {**base_analysis, "entryRange": {"min": 116.5, "max": 117}},
+        "Matched 2/2 conditions",
+    )
+
+    assert stale_action["trade_allowed"] is False
+    assert stale_action["blockers"] == ["Market data is stale"]
+
+    missing_entry_action = scanner_run.build_scan_action(
+        "buy",
+        72,
+        "low",
+        [],
+        base_analysis,
+        "Matched 2/2 conditions",
+    )
+
+    assert missing_entry_action["trade_allowed"] is False
+    assert "Entry level is unavailable" in missing_entry_action["blockers"]
+
+
 def test_evaluate_single_pair_returns_grouped_condition_results(monkeypatch):
     monkeypatch.setattr(
         scanner_run,
@@ -88,6 +124,7 @@ def test_evaluate_single_pair_returns_grouped_condition_results(monkeypatch):
             "confidence": 72,
             "marketRegime": "trending_up",
             "currentPrice": 117,
+            "entryRange": {"min": 116.5, "max": 117},
             "stopLoss": 115,
             "takeProfit1": 120,
             "riskReward": 1.5,

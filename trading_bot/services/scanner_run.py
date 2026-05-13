@@ -183,6 +183,19 @@ def build_market_context(
     }
 
 
+def has_entry_level(analysis: dict[str, Any]) -> bool:
+    entry_range = analysis.get("entryRange") or analysis.get("entry_range")
+    if isinstance(entry_range, dict):
+        if safe_float(entry_range.get("min")) > 0:
+            return True
+        if safe_float(entry_range.get("entry")) > 0:
+            return True
+    return any(
+        safe_float(analysis.get(key)) > 0
+        for key in ("entry", "entryPrice", "entry_price", "entryMin", "entry_min")
+    )
+
+
 def build_scan_action(
     recommendation: str,
     confidence: object,
@@ -193,17 +206,28 @@ def build_scan_action(
 ) -> dict[str, Any]:
     normalized = str(recommendation or "hold").lower()
     confidence_value = safe_float(confidence)
-    has_setup_levels = all(
-        safe_float(analysis.get(key)) > 0
-        for key in ("stopLoss", "takeProfit1", "currentPrice")
-    )
-    has_actionable_risk_reward = safe_float(analysis.get("riskReward")) >= 1.2
+    risk_reward_value = safe_float(analysis.get("riskReward"))
+    setup_blockers: list[str] = []
+    if not has_entry_level(analysis):
+        setup_blockers.append("Entry level is unavailable")
+    if safe_float(analysis.get("stopLoss")) <= 0:
+        setup_blockers.append("Stop loss is unavailable")
+    if safe_float(analysis.get("takeProfit1")) <= 0:
+        setup_blockers.append("Take profit is unavailable")
+    if safe_float(analysis.get("currentPrice")) <= 0:
+        setup_blockers.append("Current price is unavailable")
+    if risk_reward_value <= 0:
+        setup_blockers.append("Risk/reward is unavailable")
+    elif risk_reward_value < 1.2:
+        setup_blockers.append(f"Risk/reward is {risk_reward_value:.2f}R, below the 1.20R gate")
+    if risk_gate == "high":
+        setup_blockers.append("Risk gate is high based on volatility, data quality, or opportunity score")
+
+    blockers = list(dict.fromkeys([*risk_reasons, *setup_blockers]))
     trade_allowed = (
         normalized in {"buy", "sell", "strong_buy", "strong_sell"}
         and confidence_value >= 55
-        and risk_gate != "high"
-        and has_setup_levels
-        and has_actionable_risk_reward
+        and not blockers
     )
 
     if trade_allowed:
@@ -213,7 +237,7 @@ def build_scan_action(
             "Review entry, stop, target, and position sizing before placing an order.",
             "Confirm the current candle has not invalidated the setup.",
         ]
-        blockers: list[str] = []
+        blockers = []
     elif normalized in {"hold", "neutral", "no_trade"}:
         label = "Watch only"
         summary = "Scanner rules matched, but AI analysis does not support a trade yet."
@@ -221,7 +245,7 @@ def build_scan_action(
             "Wait for directional confirmation or stronger confidence.",
             "Use the matching conditions as a watchlist trigger.",
         ]
-        blockers = risk_reasons or ["Recommendation is not actionable"]
+        blockers = blockers or ["Recommendation is not actionable"]
     else:
         label = "Review setup"
         summary = f"{str(recommendation).upper()} setup needs confirmation before trading."
@@ -229,7 +253,6 @@ def build_scan_action(
             "Check risk gate reasons and data freshness.",
             "Confirm entry and stop placement before acting.",
         ]
-        blockers = risk_reasons
 
     if matched_summary and matched_summary not in summary:
         next_steps.append(matched_summary)
