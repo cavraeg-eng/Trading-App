@@ -142,7 +142,9 @@ def risk_gate_reasons(
         reasons.append(f"Confidence is {round(confidence)}%, below the 55% action threshold")
     if opportunity_score is not None and opportunity_score < 50:
         reasons.append(f"Opportunity score is {round(opportunity_score)}%, below the preferred 50% gate")
-    if risk_reward is not None and 0 < risk_reward_value < 1.2:
+    if risk_reward is None or risk_reward_value <= 0:
+        reasons.append("Risk/reward is unavailable")
+    elif risk_reward_value < 1.2:
         reasons.append(f"Risk/reward is {risk_reward_value:.2f}R, below the 1.20R gate")
     if market_status in {"stale", "delayed"}:
         reasons.append(f"Market data is {market_status}")
@@ -195,11 +197,13 @@ def build_scan_action(
         safe_float(analysis.get(key)) > 0
         for key in ("stopLoss", "takeProfit1", "currentPrice")
     )
+    has_actionable_risk_reward = safe_float(analysis.get("riskReward")) >= 1.2
     trade_allowed = (
         normalized in {"buy", "sell", "strong_buy", "strong_sell"}
         and confidence_value >= 55
         and risk_gate != "high"
         and has_setup_levels
+        and has_actionable_risk_reward
     )
 
     if trade_allowed:

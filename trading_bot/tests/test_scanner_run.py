@@ -39,6 +39,38 @@ def test_market_focus_for_crypto_and_metals_symbols():
     assert scanner_run.market_focus_for_symbol("US500") == "indices"
 
 
+def test_scan_action_blocks_missing_or_zero_risk_reward():
+    base_analysis = {
+        "signal": "buy",
+        "confidence": 72,
+        "currentPrice": 117,
+        "stopLoss": 115,
+        "takeProfit1": 120,
+    }
+
+    for risk_reward in (None, 0):
+        analysis = dict(base_analysis)
+        if risk_reward is not None:
+            analysis["riskReward"] = risk_reward
+        reasons = scanner_run.risk_gate_reasons(
+            analysis,
+            {"qualityFlags": [], "marketStatus": "open"},
+            "low",
+            70,
+        )
+        action = scanner_run.build_scan_action(
+            "buy",
+            72,
+            "low",
+            reasons,
+            analysis,
+            "Matched 2/2 conditions",
+        )
+
+        assert action["trade_allowed"] is False
+        assert "Risk/reward is unavailable" in action["blockers"]
+
+
 def test_evaluate_single_pair_returns_grouped_condition_results(monkeypatch):
     monkeypatch.setattr(
         scanner_run,

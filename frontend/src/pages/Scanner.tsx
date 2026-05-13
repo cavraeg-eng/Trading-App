@@ -755,22 +755,28 @@ export default function Scanner({
                                 </button>
                                 <button
                                   onClick={() => {
+                                    if (!tradeAllowed) return
                                     handleTradeClick(result.symbol)
                                     onOpenDashboard?.()
                                     setOpenMenuId(null)
                                   }}
-                                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-trading-text transition-colors hover:bg-trading-bg"
+                                  disabled={!tradeAllowed}
+                                  title={tradeAllowed ? 'Open dashboard' : tradeBlocker}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-trading-text transition-colors hover:bg-trading-bg disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                   <LayoutDashboard size={12} />
                                   Open dashboard
                                 </button>
                                 <button
                                   onClick={() => {
+                                    if (!tradeAllowed) return
                                     handleTradeClick(result.symbol)
                                     onOpenBacktest?.()
                                     setOpenMenuId(null)
                                   }}
-                                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-trading-text transition-colors hover:bg-trading-bg"
+                                  disabled={!tradeAllowed}
+                                  title={tradeAllowed ? 'Run backtest' : tradeBlocker}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-trading-text transition-colors hover:bg-trading-bg disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                   <LineChart size={12} />
                                   Run backtest
