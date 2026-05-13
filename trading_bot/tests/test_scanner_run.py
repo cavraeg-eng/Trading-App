@@ -33,6 +33,12 @@ def _prediction_stub():
     )
 
 
+def test_market_focus_for_crypto_and_metals_symbols():
+    assert scanner_run.market_focus_for_symbol("SOL/USD") == "crypto"
+    assert scanner_run.market_focus_for_symbol("XAG/USD") == "metals"
+    assert scanner_run.market_focus_for_symbol("US500") == "indices"
+
+
 def test_evaluate_single_pair_returns_grouped_condition_results(monkeypatch):
     monkeypatch.setattr(
         scanner_run,
@@ -50,6 +56,9 @@ def test_evaluate_single_pair_returns_grouped_condition_results(monkeypatch):
             "confidence": 72,
             "marketRegime": "trending_up",
             "currentPrice": 117,
+            "stopLoss": 115,
+            "takeProfit1": 120,
+            "riskReward": 1.5,
             "atr": 1.2,
             "aiScore": {"value": 70},
             "reason": "test analysis",
@@ -100,6 +109,11 @@ def test_evaluate_single_pair_returns_grouped_condition_results(monkeypatch):
     assert result["group_results"][1]["name"] == "RSI miss"
     assert result["group_results"][1]["passed"] is False
     assert result["matching_conditions"] == ["Price > 0.0"]
+    assert result["confidence_band"] == "high"
+    assert result["market_context"]["asset_class"] == "forex"
+    assert result["action"]["label"] == "Trade-ready setup"
+    assert result["action"]["trade_allowed"] is True
+    assert "test analysis" in result["rationale"][0]
 
 
 def test_scan_symbols_keeps_partial_errors_and_sorting(monkeypatch):

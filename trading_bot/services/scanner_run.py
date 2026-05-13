@@ -47,6 +47,23 @@ DEFAULT_PAIRS = [
     "USD/CAD", "NZD/USD", "XAU/USD", "BTC/USD", "US500", "EUR/GBP"
 ]
 
+METAL_SYMBOLS = {"XAU/USD", "XAG/USD", "XPT/USD", "COPPER/USD"}
+CRYPTO_SYMBOLS = {
+    "BTC/USD",
+    "ETH/USD",
+    "SOL/USD",
+    "XRP/USD",
+    "BNB/USD",
+    "ADA/USD",
+    "DOGE/USD",
+    "LTC/USD",
+    "LINK/USD",
+    "DOT/USD",
+    "AVAX/USD",
+    "MATIC/USD",
+}
+INDEX_SYMBOLS = {"US30", "US500", "US100", "UK100", "DE40", "FR40", "JP225", "AU200"}
+
 
 class ScannerConfigError(ValueError):
     """Raised when a scanner config cannot be executed."""
@@ -81,6 +98,147 @@ def _elapsed_ms(started_at: float) -> float:
     return round((time.perf_counter() - started_at) * 1000, 2)
 
 
+def confidence_band_for_scan(confidence: object) -> str:
+    value = safe_float(confidence)
+    if value >= 85:
+        return "very_high"
+    if value >= 70:
+        return "high"
+    if value >= 50:
+        return "medium"
+    return "low"
+
+
+def market_focus_for_symbol(symbol: str) -> str:
+    asset_class = asset_class_for_symbol(symbol)
+    asset_value = getattr(asset_class, "value", str(asset_class))
+    if symbol in METAL_SYMBOLS:
+        return "metals"
+    if symbol in CRYPTO_SYMBOLS or asset_value == "crypto":
+        return "crypto"
+    if symbol in INDEX_SYMBOLS or asset_value == "index":
+        return "indices"
+    if asset_value == "commodity":
+        return "commodities"
+    return "forex"
+
+
+def risk_gate_reasons(
+    analysis: dict[str, Any],
+    source_metadata: Optional[dict[str, Any]],
+    risk_gate: Optional[str],
+    opportunity_score: Optional[float],
+) -> list[str]:
+    reasons: list[str] = []
+    confidence = safe_float(analysis.get("confidence"), 50.0)
+    risk_reward = analysis.get("riskReward")
+    risk_reward_value = safe_float(risk_reward)
+    market_status = (source_metadata or {}).get("marketStatus")
+    quality_flags = set((source_metadata or {}).get("qualityFlags", []))
+    current_price = safe_float(analysis.get("currentPrice"))
+    atr = safe_float(analysis.get("atr"))
+
+    if confidence < 55:
+        reasons.append(f"Confidence is {round(confidence)}%, below the 55% action threshold")
+    if opportunity_score is not None and opportunity_score < 50:
+        reasons.append(f"Opportunity score is {round(opportunity_score)}%, below the preferred 50% gate")
+    if risk_reward is not None and 0 < risk_reward_value < 1.2:
+        reasons.append(f"Risk/reward is {risk_reward_value:.2f}R, below the 1.20R gate")
+    if market_status in {"stale", "delayed"}:
+        reasons.append(f"Market data is {market_status}")
+    if (source_metadata or {}).get("isFallback"):
+        reasons.append("Data source is using fallback market data")
+    if "stale_data" in quality_flags:
+        reasons.append("Source quality flags include stale data")
+    if current_price > 0 and atr > 0:
+        atr_pct = atr / current_price * 100
+        if atr_pct > 2:
+            reasons.append(f"ATR is elevated at {atr_pct:.2f}% of price")
+    if risk_gate == "high" and not reasons:
+        reasons.append("Risk gate is high based on volatility, data quality, or opportunity score")
+
+    return reasons
+
+
+def build_market_context(
+    symbol: str,
+    analysis: dict[str, Any],
+    source_metadata: Optional[dict[str, Any]],
+    trade_style: str,
+    timeframe: str,
+) -> dict[str, Any]:
+    return {
+        "asset_class": market_focus_for_symbol(symbol),
+        "timeframe": timeframe,
+        "trade_style": trade_style,
+        "market_status": (source_metadata or {}).get("marketStatus", "unknown"),
+        "data_source": (source_metadata or {}).get("sourceName", "unknown"),
+        "freshness_seconds": (source_metadata or {}).get("freshnessSeconds"),
+        "volatility_regime": analysis.get("marketRegime", "ranging"),
+        "current_price": analysis.get("currentPrice"),
+        "atr": analysis.get("atr"),
+        "risk_reward": analysis.get("riskReward"),
+    }
+
+
+def build_scan_action(
+    recommendation: str,
+    confidence: object,
+    risk_gate: Optional[str],
+    risk_reasons: list[str],
+    analysis: dict[str, Any],
+    matched_summary: str,
+) -> dict[str, Any]:
+    normalized = str(recommendation or "hold").lower()
+    confidence_value = safe_float(confidence)
+    has_setup_levels = all(
+        safe_float(analysis.get(key)) > 0
+        for key in ("stopLoss", "takeProfit1", "currentPrice")
+    )
+    trade_allowed = (
+        normalized in {"buy", "sell", "strong_buy", "strong_sell"}
+        and confidence_value >= 55
+        and risk_gate != "high"
+        and has_setup_levels
+    )
+
+    if trade_allowed:
+        label = "Trade-ready setup"
+        summary = f"{str(recommendation).upper()} setup cleared scanner rules and core risk gates."
+        next_steps = [
+            "Review entry, stop, target, and position sizing before placing an order.",
+            "Confirm the current candle has not invalidated the setup.",
+        ]
+        blockers: list[str] = []
+    elif normalized in {"hold", "neutral", "no_trade"}:
+        label = "Watch only"
+        summary = "Scanner rules matched, but AI analysis does not support a trade yet."
+        next_steps = [
+            "Wait for directional confirmation or stronger confidence.",
+            "Use the matching conditions as a watchlist trigger.",
+        ]
+        blockers = risk_reasons or ["Recommendation is not actionable"]
+    else:
+        label = "Review setup"
+        summary = f"{str(recommendation).upper()} setup needs confirmation before trading."
+        next_steps = [
+            "Check risk gate reasons and data freshness.",
+            "Confirm entry and stop placement before acting.",
+        ]
+        blockers = risk_reasons
+
+    if matched_summary and matched_summary not in summary:
+        next_steps.append(matched_summary)
+
+    return {
+        "label": label,
+        "summary": summary,
+        "next_steps": next_steps,
+        "blockers": blockers,
+        "trade_allowed": trade_allowed,
+    }
+
+
 def scanner_error_result(
     symbol: str,
     error: object,
@@ -103,6 +261,29 @@ def scanner_error_result(
         "source_score": None,
         "source_metadata": None,
         "reason": message,
+        "confidence_band": "low",
+        "rationale": [message],
+        "action": {
+            "label": "Backend failure",
+            "summary": "This symbol could not be evaluated by the scanner.",
+            "next_steps": ["Review the backend error before considering this market."],
+            "blockers": [message],
+            "trade_allowed": False,
+        },
+        "market_context": {
+            "asset_class": market_focus_for_symbol(symbol),
+            "timeframe": timeframe,
+            "trade_style": trade_style,
+            "market_status": "unknown",
+            "data_source": "unknown",
+            "freshness_seconds": None,
+            "volatility_regime": None,
+            "current_price": None,
+            "atr": None,
+            "risk_reward": None,
+        },
+        "risk_gate": "high",
+        "risk_gate_reasons": [message],
         "scan_status": "error",
         "error_message": message,
         "evaluation_latency_ms": latency_ms,
@@ -362,10 +543,12 @@ def evaluate_single_pair(
             analysis_override=analysis,
             metadata_override=source_metadata,
         )
-        ranking = rank_opportunity(analysis or {}, source_metadata)
+        source_meta = source_metadata if isinstance(source_metadata, dict) else {}
+        analysis_payload = analysis or {}
+        ranking = rank_opportunity(analysis_payload, source_meta)
         recommendation = (analysis or {}).get("signal", signal)
         quality_flags = (
-            source_metadata.get("qualityFlags", []) if isinstance(source_metadata, dict) else []
+            source_meta.get("qualityFlags", []) if isinstance(source_metadata, dict) else []
         )
         warnings = [str(flag).replace("_", " ") for flag in quality_flags if flag]
         if recommendation == "hold":
@@ -378,6 +561,25 @@ def evaluate_single_pair(
         reason = analysis_reason if analysis_reason else matched_summary
         if analysis_reason and failed_conditions:
             reason = f"{analysis_reason} ({matched_summary})"
+        opportunity_score = ranking.get("opportunityScore")
+        risk_gate = ranking.get("riskGate")
+        gate_reasons = risk_gate_reasons(
+            analysis_payload,
+            source_meta,
+            risk_gate,
+            opportunity_score,
+        )
+        rationale = [reason, matched_summary]
+        if gate_reasons:
+            rationale.append(f"Risk gate: {risk_gate or 'unknown'}")
+        action = build_scan_action(
+            str(recommendation or signal),
+            analysis_payload.get("confidence", 50),
+            risk_gate,
+            gate_reasons,
+            analysis_payload,
+            matched_summary,
+        )
 
         return {
             "symbol": symbol,
@@ -387,10 +589,11 @@ def evaluate_single_pair(
             "matching_conditions": matching_conditions,
             "indicator_values": safe_indicators,
             "confidence": (analysis or {}).get("confidence", 50),
+            "confidence_band": confidence_band_for_scan((analysis or {}).get("confidence", 50)),
             "market_regime": (analysis or {}).get("marketRegime", "ranging"),
             "trade_style": trade_style,
             "timeframe": timeframe,
-            "opportunity_score": ranking.get("opportunityScore"),
+            "opportunity_score": opportunity_score,
             "source_score": ranking.get("sourceScore"),
             "source_metadata": source_metadata,
             "prediction_id": prediction.prediction_id,
@@ -402,6 +605,8 @@ def evaluate_single_pair(
             },
             "prediction_latency_ms": prediction.latency.total_latency_ms,
             "reason": reason,
+            "rationale": list(dict.fromkeys(rationale)),
+            "action": action,
             "risk_reward": (analysis or {}).get("riskReward"),
             "data_fetched_at": (analysis or {}).get("data_fetched_at"),
             "warnings": warnings,
@@ -412,10 +617,18 @@ def evaluate_single_pair(
             "take_profit2": (analysis or {}).get("takeProfit2"),
             "take_profit3": (analysis or {}).get("takeProfit3"),
             "current_price": (analysis or {}).get("currentPrice"),
-            "risk_gate": ranking.get("riskGate"),
+            "risk_gate": risk_gate,
+            "risk_gate_reasons": gate_reasons,
+            "market_context": build_market_context(
+                symbol,
+                analysis_payload,
+                source_meta,
+                trade_style,
+                timeframe,
+            ),
             "risk_context": {
                 "volatility_regime": (analysis or {}).get("marketRegime", "ranging"),
-                "market_status": (source_metadata or {}).get("marketStatus", "unknown"),
+                "market_status": source_meta.get("marketStatus", "unknown"),
             },
             "atr": (analysis or {}).get("atr"),
         }

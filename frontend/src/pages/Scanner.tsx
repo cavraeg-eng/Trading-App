@@ -102,14 +102,31 @@ function downloadResults(
     score: number
     opportunity_score?: number
     confidence?: number
+    confidence_band?: string
     timeframe?: string
     trade_style?: string
     reason?: string
+    risk_gate?: string
+    action?: { label: string; trade_allowed: boolean }
+    market_context?: { asset_class?: string }
   }>
 ) {
   const rows = [
-    ['Symbol', 'Signal', 'Score', 'Opportunity', 'Confidence', 'Timeframe', 'Trade Style', 'Reason'],
-    ...results.map((r) => [r.symbol, r.signal, r.score, r.opportunity_score, r.confidence, r.timeframe, r.trade_style, r.reason]),
+    ['Symbol', 'Signal', 'Score', 'Opportunity', 'Confidence', 'Confidence Band', 'Risk Gate', 'Action', 'Market', 'Timeframe', 'Trade Style', 'Reason'],
+    ...results.map((r) => [
+      r.symbol,
+      r.signal,
+      r.score,
+      r.opportunity_score,
+      r.confidence,
+      r.confidence_band,
+      r.risk_gate,
+      r.action?.label,
+      r.market_context?.asset_class,
+      r.timeframe,
+      r.trade_style,
+      r.reason,
+    ]),
   ]
   const blob = new Blob([toCsv(rows)], { type: 'text/csv;charset=utf-8;' })
   const link = document.createElement('a')
@@ -183,6 +200,7 @@ export default function Scanner({
     groups,
     riskFilter,
     styleFilter,
+    marketFilter,
     setGroups,
     setLogic,
     setSelectedPairs,
@@ -191,6 +209,7 @@ export default function Scanner({
     setTimeframe,
     setRiskFilter,
     setStyleFilter,
+    setMarketFilter,
     applyPreset,
     loadSavedScanner,
     runScan,
@@ -541,11 +560,13 @@ export default function Scanner({
                       activeScannerKey={activeScannerKey}
                       riskFilter={riskFilter}
                       styleFilter={styleFilter}
+                      marketFilter={marketFilter}
                       onApplyPreset={handleApplyPreset}
                       onApplySaved={handleLoadSaved}
                       onDeleteSaved={handleDeleteSaved}
                       onRiskFilterChange={setRiskFilter}
                       onStyleFilterChange={setStyleFilter}
+                      onMarketFilterChange={setMarketFilter}
                     />
                   )}
                 </div>
@@ -661,6 +682,10 @@ export default function Scanner({
                   const actionable = isActionablePrediction(prediction)
                   const stale = isPredictionStale(prediction)
                   const noTrade = isNoTradePrediction(prediction)
+                  const action = result.action
+                  const gateReasons = result.risk_gate_reasons ?? []
+                  const tradeAllowed = !isError && (action?.trade_allowed ?? actionable)
+                  const tradeBlocker = action?.blockers?.[0] ?? gateReasons[0] ?? 'Scan result is not trade-ready'
 
                   return (
                     <div key={resultKey} className={`px-4 py-3 transition-colors hover:bg-trading-bg/30 ${isError ? 'bg-rose-500/5' : ''}`}>
@@ -699,10 +724,11 @@ export default function Scanner({
                         <div className="flex shrink-0 items-center gap-1.5">
                           <button
                             onClick={() => handleTradeClick(result.symbol)}
-                            disabled={isError}
+                            disabled={!tradeAllowed}
+                            title={tradeAllowed ? 'Open live trading' : tradeBlocker}
                             className="inline-flex items-center gap-1 rounded-md bg-trading-accent px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
                           >
-                            Trade <ArrowRight size={12} />
+                            {tradeAllowed ? 'Trade' : 'Review'} <ArrowRight size={12} />
                           </button>
                           <div className="relative" ref={isMenuOpen ? menuRef : undefined}>
                             <button
@@ -786,6 +812,16 @@ export default function Scanner({
                             {result.risk_gate} risk
                           </span>
                         ) : null}
+                        {result.confidence_band ? (
+                          <span className="rounded-md bg-trading-bg px-2 py-0.5 text-[10px] font-medium text-trading-text">
+                            {result.confidence_band.replace('_', ' ')} confidence
+                          </span>
+                        ) : null}
+                        {result.market_context?.asset_class ? (
+                          <span className="rounded-md bg-trading-bg px-2 py-0.5 text-[10px] font-medium capitalize text-trading-text">
+                            {result.market_context.asset_class}
+                          </span>
+                        ) : null}
                         {result.source_metadata ? (
                           <>
                             <DataSourceBadge
@@ -844,6 +880,53 @@ export default function Scanner({
                             <div className="mt-2 flex items-start gap-1.5 text-[10px] text-amber-200">
                               <ShieldAlert size={11} className="mt-0.5 shrink-0" />
                               <span>{prediction.warnings.slice(0, 2).join(' · ')}</span>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {(action || gateReasons.length > 0 || result.market_context) ? (
+                        <div className="mt-2 rounded-lg border border-[#1c2333] bg-trading-bg/70 p-2.5">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <div className="text-[10px] uppercase tracking-wide text-trading-muted">Scanner action</div>
+                              <div className={`mt-0.5 text-xs font-semibold ${
+                                tradeAllowed ? 'text-emerald-300' : isError ? 'text-rose-300' : 'text-amber-200'
+                              }`}>
+                                {action?.label ?? (tradeAllowed ? 'Trade-ready setup' : 'Review setup')}
+                              </div>
+                            </div>
+                            {result.market_context ? (
+                              <div className="flex flex-wrap gap-1 text-[10px] text-trading-muted">
+                                {result.market_context.market_status ? (
+                                  <span className="rounded-md bg-trading-card px-2 py-0.5">{result.market_context.market_status}</span>
+                                ) : null}
+                                {result.market_context.data_source ? (
+                                  <span className="rounded-md bg-trading-card px-2 py-0.5">{result.market_context.data_source}</span>
+                                ) : null}
+                                {result.market_context.risk_reward ? (
+                                  <span className="rounded-md bg-trading-card px-2 py-0.5">{result.market_context.risk_reward.toFixed(2)}R</span>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
+                          {action?.summary ? (
+                            <p className="mt-2 text-[11px] leading-5 text-trading-muted">{action.summary}</p>
+                          ) : null}
+                          {(action?.next_steps?.length || gateReasons.length) ? (
+                            <div className="mt-2 grid gap-2 text-[10px] sm:grid-cols-2">
+                              {action?.next_steps?.length ? (
+                                <div>
+                                  <div className="uppercase tracking-wide text-trading-muted">Next step</div>
+                                  <div className="mt-0.5 text-trading-text">{action.next_steps[0]}</div>
+                                </div>
+                              ) : null}
+                              {gateReasons.length ? (
+                                <div>
+                                  <div className="uppercase tracking-wide text-trading-muted">Risk gate</div>
+                                  <div className="mt-0.5 text-amber-200">{gateReasons[0]}</div>
+                                </div>
+                              ) : null}
                             </div>
                           ) : null}
                         </div>

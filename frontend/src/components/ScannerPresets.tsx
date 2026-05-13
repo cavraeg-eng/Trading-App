@@ -24,11 +24,13 @@ interface ScannerPresetsProps {
   activeScannerKey?: string
   riskFilter?: 'all' | 'low' | 'medium' | 'high'
   styleFilter?: 'all' | 'swing' | 'scalp'
+  marketFilter?: 'all' | 'forex' | 'metals' | 'crypto' | 'indices'
   onApplyPreset: (preset: ScannerPreset) => void
   onApplySaved: (scanner: SavedScanner) => void
   onDeleteSaved: (scannerId: number) => void
   onRiskFilterChange?: (filter: 'all' | 'low' | 'medium' | 'high') => void
   onStyleFilterChange?: (filter: 'all' | 'swing' | 'scalp') => void
+  onMarketFilterChange?: (filter: 'all' | 'forex' | 'metals' | 'crypto' | 'indices') => void
 }
 
 const iconMap: Record<string, React.ElementType> = {
@@ -108,11 +110,13 @@ export default function ScannerPresets({
   activeScannerKey,
   riskFilter = 'all',
   styleFilter = 'all',
+  marketFilter = 'all',
   onApplyPreset,
   onApplySaved,
   onDeleteSaved,
   onRiskFilterChange,
   onStyleFilterChange,
+  onMarketFilterChange,
 }: ScannerPresetsProps) {
   return (
     <div className="space-y-5">
@@ -136,8 +140,26 @@ export default function ScannerPresets({
           </div>
 
           {/* Filter bar */}
-          {onRiskFilterChange || onStyleFilterChange ? (
+          {onRiskFilterChange || onStyleFilterChange || onMarketFilterChange ? (
             <div className="mb-3 flex flex-wrap items-center gap-2">
+              {onMarketFilterChange ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wider text-trading-muted">Market</span>
+                  <div className="flex rounded-md border border-trading-border bg-trading-card p-0.5">
+                    {(['all', 'forex', 'metals', 'crypto', 'indices'] as const).map((market) => (
+                      <button
+                        key={market}
+                        onClick={() => onMarketFilterChange(market)}
+                        className={`rounded px-2 py-0.5 text-[10px] font-medium capitalize transition-colors ${
+                          marketFilter === market ? 'bg-trading-accent text-white' : 'text-trading-muted hover:text-trading-text'
+                        }`}
+                      >
+                        {market}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               {onRiskFilterChange ? (
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] uppercase tracking-wider text-trading-muted">Risk</span>
@@ -261,12 +283,25 @@ export default function ScannerPresets({
                     <p className="mt-3 text-[11px] text-trading-muted">
                       <span className="font-medium text-trading-text">Best for:</span> {preset.best_for || 'General opportunity scanning'}
                     </p>
+                    {preset.action_prompt ? (
+                      <p className="mt-2 text-[11px] text-trading-muted">
+                        <span className="font-medium text-trading-text">Action:</span> {preset.action_prompt}
+                      </p>
+                    ) : null}
                     <div className="mt-3 flex flex-wrap gap-1">
                       <MetaPill label={`${rulesCount(preset)} rules`} />
                       {preset.timeframe ? <MetaPill label={preset.timeframe.toUpperCase()} /> : null}
                       {preset.trade_style ? <MetaPill label={preset.trade_style} /> : null}
+                      {preset.market_scope ? <MetaPill label={preset.market_scope} /> : null}
                       {preset.tags?.slice(0, 2).map((tag) => <MetaPill key={tag} label={tag} />)}
                     </div>
+                    {preset.risk_gates?.length ? (
+                      <div className="mt-3 flex flex-wrap gap-1">
+                        {preset.risk_gates.slice(0, 3).map((gate) => (
+                          <MetaPill key={`${preset.id}-${gate}`} label={gate} />
+                        ))}
+                      </div>
+                    ) : null}
                     <button
                       onClick={() => onApplyPreset(preset)}
                       className={`mt-4 w-full rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${

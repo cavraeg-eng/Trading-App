@@ -101,6 +101,7 @@ export interface ScanResult {
   matching_conditions: string[];
   indicator_values: Record<string, number>;
   confidence?: number;
+  confidence_band?: 'low' | 'medium' | 'high' | 'very_high';
   market_regime?: string;
   trade_style?: TradeStyle | string;
   timeframe?: ScannerTimeframe | string;
@@ -108,6 +109,26 @@ export interface ScanResult {
   source_score?: number;
   source_metadata?: SourceMetadata;
   reason?: string;
+  rationale?: string[];
+  action?: {
+    label: string;
+    summary: string;
+    next_steps: string[];
+    blockers: string[];
+    trade_allowed: boolean;
+  };
+  market_context?: {
+    asset_class: 'forex' | 'metals' | 'crypto' | 'indices' | 'commodities' | string;
+    timeframe?: string;
+    trade_style?: string;
+    market_status?: string;
+    data_source?: string;
+    freshness_seconds?: number | null;
+    volatility_regime?: string | null;
+    current_price?: number | null;
+    atr?: number | null;
+    risk_reward?: number | null;
+  };
   entry_range?: { min: number; max: number } | null;
   stop_loss?: number | null;
   take_profit1?: number | null;
@@ -118,6 +139,7 @@ export interface ScanResult {
   risk_context?: { volatility_regime: string; market_status: string };
   atr?: number;
   risk_reward?: number | null;
+  risk_gate_reasons?: string[];
   data_fetched_at?: number | null;
   warnings?: string[];
   scan_status?: 'matched' | 'warning' | 'error';
@@ -154,6 +176,10 @@ export interface ScannerPreset {
   risk?: 'low' | 'medium' | 'high';
   popularity?: string;
   accent?: string;
+  markets?: Array<'forex' | 'metals' | 'crypto' | 'indices' | 'commodities' | string>;
+  market_scope?: string;
+  risk_gates?: string[];
+  action_prompt?: string;
 }
 
 export interface ScannerIndicatorDefinition {
