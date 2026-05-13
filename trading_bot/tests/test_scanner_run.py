@@ -33,6 +33,80 @@ def _prediction_stub():
     )
 
 
+def test_market_focus_for_crypto_and_metals_symbols():
+    assert scanner_run.market_focus_for_symbol("SOL/USD") == "crypto"
+    assert scanner_run.market_focus_for_symbol("XAG/USD") == "metals"
+    assert scanner_run.market_focus_for_symbol("US500") == "indices"
+
+
+def test_scan_action_blocks_missing_or_zero_risk_reward():
+    base_analysis = {
+        "signal": "buy",
+        "confidence": 72,
+        "currentPrice": 117,
+        "entryRange": {"min": 116.5, "max": 117},
+        "stopLoss": 115,
+        "takeProfit1": 120,
+    }
+
+    for risk_reward in (None, 0):
+        analysis = dict(base_analysis)
+        if risk_reward is not None:
+            analysis["riskReward"] = risk_reward
+        reasons = scanner_run.risk_gate_reasons(
+            analysis,
+            {"qualityFlags": [], "marketStatus": "open"},
+            "low",
+            70,
+        )
+        action = scanner_run.build_scan_action(
+            "buy",
+            72,
+            "low",
+            reasons,
+            analysis,
+            "Matched 2/2 conditions",
+        )
+
+        assert action["trade_allowed"] is False
+        assert "Risk/reward is unavailable" in action["blockers"]
+
+
+def test_scan_action_blocks_risk_reasons_and_missing_entry():
+    base_analysis = {
+        "signal": "buy",
+        "confidence": 72,
+        "currentPrice": 117,
+        "stopLoss": 115,
+        "takeProfit1": 120,
+        "riskReward": 1.5,
+    }
+
+    stale_action = scanner_run.build_scan_action(
+        "buy",
+        72,
+        "medium",
+        ["Market data is stale"],
+        {**base_analysis, "entryRange": {"min": 116.5, "max": 117}},
+        "Matched 2/2 conditions",
+    )
+
+    assert stale_action["trade_allowed"] is False
+    assert stale_action["blockers"] == ["Market data is stale"]
+
+    missing_entry_action = scanner_run.build_scan_action(
+        "buy",
+        72,
+        "low",
+        [],
+        base_analysis,
+        "Matched 2/2 conditions",
+    )
+
+    assert missing_entry_action["trade_allowed"] is False
+    assert "Entry level is unavailable" in missing_entry_action["blockers"]
+
+
 def test_evaluate_single_pair_returns_grouped_condition_results(monkeypatch):
     monkeypatch.setattr(
         scanner_run,
@@ -50,6 +124,10 @@ def test_evaluate_single_pair_returns_grouped_condition_results(monkeypatch):
             "confidence": 72,
             "marketRegime": "trending_up",
             "currentPrice": 117,
+            "entryRange": {"min": 116.5, "max": 117},
+            "stopLoss": 115,
+            "takeProfit1": 120,
+            "riskReward": 1.5,
             "atr": 1.2,
             "aiScore": {"value": 70},
             "reason": "test analysis",
@@ -100,6 +178,11 @@ def test_evaluate_single_pair_returns_grouped_condition_results(monkeypatch):
     assert result["group_results"][1]["name"] == "RSI miss"
     assert result["group_results"][1]["passed"] is False
     assert result["matching_conditions"] == ["Price > 0.0"]
+    assert result["confidence_band"] == "high"
+    assert result["market_context"]["asset_class"] == "forex"
+    assert result["action"]["label"] == "Trade-ready setup"
+    assert result["action"]["trade_allowed"] is True
+    assert "test analysis" in result["rationale"][0]
 
 
 def test_scan_symbols_keeps_partial_errors_and_sorting(monkeypatch):

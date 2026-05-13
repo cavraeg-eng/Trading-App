@@ -20,6 +20,60 @@ from trading_bot.services.scanner_run import (
 
 router = APIRouter(prefix="/api/scanner", tags=["scanner"])
 
+METALS = {"XAU/USD", "XAG/USD", "XPT/USD", "COPPER/USD"}
+CRYPTO = {
+    "BTC/USD",
+    "ETH/USD",
+    "SOL/USD",
+    "XRP/USD",
+    "BNB/USD",
+    "ADA/USD",
+    "DOGE/USD",
+    "LTC/USD",
+    "LINK/USD",
+    "DOT/USD",
+    "AVAX/USD",
+    "MATIC/USD",
+}
+INDICES = {"US30", "US500", "US100", "UK100", "DE40", "FR40", "JP225", "AU200"}
+
+
+def _preset_markets(pairs: list[str]) -> list[str]:
+    markets: list[str] = []
+    if any(pair in METALS for pair in pairs):
+        markets.append("metals")
+    if any(pair in CRYPTO for pair in pairs):
+        markets.append("crypto")
+    if any(pair in INDICES for pair in pairs):
+        markets.append("indices")
+    if any("/" in pair and pair not in METALS and pair not in CRYPTO for pair in pairs):
+        markets.append("forex")
+    return markets or ["forex"]
+
+
+def _risk_gate_copy(risk: str) -> list[str]:
+    if risk == "low":
+        return ["confidence >= 55%", "fresh market data", "risk gate not high"]
+    if risk == "high":
+        return ["confidence >= 70%", "confirm stop distance", "avoid stale or fallback data"]
+    return ["confidence >= 60%", "risk/reward >= 1.20R", "data source healthy"]
+
+
+def _enrich_presets(presets: list[dict]) -> list[dict]:
+    for preset in presets:
+        pairs = preset.get("recommended_pairs", [])
+        risk = preset.get("risk", "medium")
+        markets = _preset_markets(pairs)
+        preset["markets"] = markets
+        preset["risk_gates"] = _risk_gate_copy(risk)
+        preset["action_prompt"] = (
+            "Treat matches as execution candidates after setup levels and risk gate pass."
+            if risk != "high"
+            else "Treat matches as review-first setups until volatility and stop distance are confirmed."
+        )
+        preset["market_scope"] = ", ".join(item.title() for item in markets)
+    return presets
+
 
 @router.get("/presets")
 async def get_presets():
@@ -50,7 +104,7 @@ async def get_presets():
             ],
             "trade_style": "swing",
             "timeframe": "4h",
-            "recommended_pairs": ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "US500"],
+            "recommended_pairs": ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "XAG/USD", "US500"],
             "tags": ["trend", "breakout", "swing"],
             "conditions": [
                 {"indicator": "Price", "operator": "crosses_above", "compare_indicator": "EMA", "value": 0},
@@ -103,7 +157,7 @@ async def get_presets():
             "logic": "AND",
             "trade_style": "swing",
             "timeframe": "1h",
-            "recommended_pairs": ["XAU/USD", "BTC/USD", "US500", "GBP/JPY", "EUR/JPY"],
+            "recommended_pairs": ["XAU/USD", "XAG/USD", "BTC/USD", "ETH/USD", "US500", "GBP/JPY", "EUR/JPY"],
             "tags": ["volatility", "breakout"],
             "conditions": [
                 {"indicator": "Price", "operator": "crosses_above", "compare_indicator": "BB Upper", "value": 0},
@@ -187,7 +241,7 @@ async def get_presets():
             "logic": "AND",
             "trade_style": "swing",
             "timeframe": "1d",
-            "recommended_pairs": ["EUR/USD", "USD/JPY", "XAU/USD", "BTC/USD", "US500"],
+            "recommended_pairs": ["EUR/USD", "USD/JPY", "XAU/USD", "XAG/USD", "BTC/USD", "ETH/USD", "US500"],
             "tags": ["macro", "trend", "confirmation"],
             "conditions": [
                 {"indicator": "Price", "operator": ">", "compare_indicator": "EMA", "value": 0},
@@ -198,19 +252,19 @@ async def get_presets():
         {
             "id": "aurum_edge",
             "name": "Aurum Edge",
-            "description": "Gold-focused scalping scanner for fast XAU/USD extremes and participation bursts",
+            "description": "Metals scalping scanner for fast gold and silver extremes with participation bursts",
             "icon": "sparkles",
-            "category": "Gold scalper",
-            "best_for": "XAU/USD 5-minute scalp ideas when gold stretches into volatility extremes.",
+            "category": "Metals scalper",
+            "best_for": "Gold, silver, and platinum 5-minute scalp ideas near volatility extremes.",
             "cadence": "5M",
             "risk": "high",
-            "popularity": "Gold",
+            "popularity": "Metals",
             "accent": "amber",
             "logic": "AND",
             "trade_style": "scalp",
             "timeframe": "5m",
-            "recommended_pairs": ["XAU/USD"],
-            "tags": ["gold", "scalp", "volatility"],
+            "recommended_pairs": ["XAU/USD", "XAG/USD", "XPT/USD"],
+            "tags": ["metals", "gold", "scalp", "volatility"],
             "conditions": [
                 {"indicator": "RSI", "operator": "between", "value": 20, "value2": 38},
                 {"indicator": "BB", "operator": "<=", "value": -0.7},
@@ -231,7 +285,7 @@ async def get_presets():
             "logic": "AND",
             "trade_style": "scalp",
             "timeframe": "15m",
-            "recommended_pairs": ["BTC/USD", "ETH/USD"],
+            "recommended_pairs": ["BTC/USD", "ETH/USD", "SOL/USD", "AVAX/USD"],
             "tags": ["crypto", "momentum", "volatility"],
             "conditions": [
                 {"indicator": "ATR", "operator": ">", "value": 1.0},
@@ -240,7 +294,7 @@ async def get_presets():
             ]
         },
     ]
-    return {"presets": presets}
+    return {"presets": _enrich_presets(presets)}
 
 
 @router.get("/metadata")

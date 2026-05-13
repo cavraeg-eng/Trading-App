@@ -510,6 +510,11 @@ class ScanResult(BaseModel):
     source_score: Optional[float] = None
     source_metadata: Optional[Dict[str, Any]] = None
     reason: Optional[str] = None
+    confidence_band: Optional[str] = None
+    rationale: List[str] = []
+    action: Optional[Dict[str, Any]] = None
+    market_context: Optional[Dict[str, Any]] = None
+    risk_gate_reasons: List[str] = []
 
 
 class SignalStatus(str, Enum):

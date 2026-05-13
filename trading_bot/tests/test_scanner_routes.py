@@ -25,6 +25,19 @@ def test_scanner_metadata_endpoint():
     assert any(item["key"] == "RSI" for item in payload["indicators"])
 
 
+def test_scanner_presets_include_market_and_risk_guidance():
+    response = client.get("/api/scanner/presets")
+    assert response.status_code == 200
+    presets = response.json()["presets"]
+
+    assert any("crypto" in preset["markets"] for preset in presets)
+    assert any("metals" in preset["markets"] for preset in presets)
+    for preset in presets:
+        assert preset["market_scope"]
+        assert preset["risk_gates"]
+        assert preset["action_prompt"]
+
+
 def test_saved_scanner_crud():
     create_response = client.post(
         "/api/scanner/save",
@@ -115,6 +128,14 @@ def test_scan_returns_actionable_fields():
     for result in payload["results"]:
         assert "risk_gate" in result
         assert result["risk_gate"] in ("low", "medium", "high")
+        assert "risk_gate_reasons" in result
+        assert "confidence_band" in result
+        assert result["confidence_band"] in ("low", "medium", "high", "very_high")
+        assert "rationale" in result
+        assert "action" in result
+        assert "trade_allowed" in result["action"]
+        assert "market_context" in result
+        assert "asset_class" in result["market_context"]
         assert "risk_context" in result
         assert "volatility_regime" in result["risk_context"]
         assert "market_status" in result["risk_context"]

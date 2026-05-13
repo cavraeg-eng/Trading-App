@@ -64,6 +64,7 @@ export function useScanner(initialCategorySymbols: string[]) {
   const [lastRunAt, setLastRunAt] = useState<string | null>(null)
   const [riskFilter, setRiskFilter] = useState<'all' | 'low' | 'medium' | 'high'>('all')
   const [styleFilter, setStyleFilter] = useState<'all' | 'swing' | 'scalp'>('all')
+  const [marketFilter, setMarketFilter] = useState<'all' | 'forex' | 'metals' | 'crypto' | 'indices'>('all')
   const abortRef = useRef<AbortController | null>(null)
   const requestIdRef = useRef(0)
 
@@ -116,9 +117,11 @@ export function useScanner(initialCategorySymbols: string[]) {
     return presets.filter((preset) => {
       const riskMatch = riskFilter === 'all' || (preset.risk ?? 'medium') === riskFilter
       const styleMatch = styleFilter === 'all' || preset.trade_style === styleFilter
-      return riskMatch && styleMatch
+      const presetMarkets = preset.markets ?? []
+      const marketMatch = marketFilter === 'all' || presetMarkets.includes(marketFilter)
+      return riskMatch && styleMatch && marketMatch
     })
-  }, [presets, riskFilter, styleFilter])
+  }, [presets, riskFilter, styleFilter, marketFilter])
 
   const supportedIndicators = useMemo(
     () => (metadata?.indicators ?? []).filter((indicator) => indicator.supported),
@@ -420,6 +423,7 @@ export function useScanner(initialCategorySymbols: string[]) {
     lastRunAt,
     riskFilter,
     styleFilter,
+    marketFilter,
     setConditions,
     setLogic,
     setGroups,
@@ -433,6 +437,7 @@ export function useScanner(initialCategorySymbols: string[]) {
     setTimeframe,
     setRiskFilter,
     setStyleFilter,
+    setMarketFilter,
     applyPreset,
     loadSavedScanner,
     runScan,
