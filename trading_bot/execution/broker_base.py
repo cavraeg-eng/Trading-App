@@ -46,6 +46,7 @@ class BrokerCapabilities:
     close_position: bool = True
     modify_trade: bool = False
     quotes: bool = False
+    candles: bool = False
 
     def as_dict(self) -> Dict[str, bool]:
         """Return capabilities as a serializable dictionary."""
@@ -128,6 +129,19 @@ class BrokerQuote:
     ask: Optional[float] = None
     last: Optional[float] = None
     timestamp: datetime = field(default_factory=datetime.utcnow)
+    broker_id: str = ""
+
+
+@dataclass
+class BrokerCandle:
+    """Broker OHLCV candle data class."""
+    symbol: str
+    time: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float = 0.0
     broker_id: str = ""
 
 
@@ -317,6 +331,15 @@ class BaseBroker(ABC):
     async def get_quote(self, symbol: str) -> BrokerQuote:
         """Get the latest quote for a symbol."""
         raise BrokerCapabilityError(self.broker_id, "quotes")
+
+    async def get_candles(
+        self,
+        symbol: str,
+        timeframe: str = "1h",
+        count: int = 200,
+    ) -> List[BrokerCandle]:
+        """Get recent OHLCV candles for a symbol."""
+        raise BrokerCapabilityError(self.broker_id, "candles")
 
     def get_info(self) -> dict:
         """Get broker information."""

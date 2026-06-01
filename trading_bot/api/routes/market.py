@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from trading_bot.api.models import CandleData
 from trading_bot.config import get_logger
-from trading_bot.execution.broker_base import BrokerQuote
+from trading_bot.execution.broker_base import BrokerCandle, BrokerQuote
 from trading_bot.execution.broker_manager import BrokerOperationError, broker_manager
 from trading_bot.services.market_analysis import (
     ALLOWED_SYMBOLS,
@@ -36,6 +36,7 @@ _cache_lock = threading.RLock()
 CACHE_TTL_INTRADAY = 5  # Faster refresh for active intraday trading views
 CACHE_TTL_DAILY = 300  # 300 seconds for daily timeframe
 BROKER_QUOTE_TIMEOUT_SECONDS = 8.0
+BROKER_CANDLES_TIMEOUT_SECONDS = 12.0
 
 # Timeframes that need candle aggregation (yfinance doesn't support them natively)
 AGGREGATE_TIMEFRAMES = {
@@ -132,6 +133,70 @@ async def _active_broker_quote(symbol: str, timeframe: str) -> Optional[dict]:
             "freshnessSeconds": max(0.0, fetched_at - quote.timestamp.timestamp()),
             "qualityFlags": [],
             "lastBarTimestamp": quote.timestamp.isoformat(),
+            "marketStatus": "live",
+        },
+    }
+
+
+def _candle_to_api(candle: BrokerCandle, decimals: int) -> CandleData:
+    return CandleData(
+        time=int(candle.time.timestamp()),
+        open=round(candle.open, decimals),
+        high=round(candle.high, decimals),
+        low=round(candle.low, decimals),
+        close=round(candle.close, decimals),
+        volume=round(float(candle.volume), 2),
+    )
+
+
+async def _active_broker_candles(symbol: str, timeframe: str, limit: int) -> Optional[dict]:
+    active = broker_manager.get_active_broker_info()
+    if not active or not active.get("connected"):
+        return None
+    capabilities = active.get("capabilities") or {}
+    if not capabilities.get("candles"):
+        return None
+
+    broker_id = str(active.get("id") or active.get("broker_id") or "")
+    broker = broker_manager.get_broker(broker_id)
+    if not broker:
+        return None
+
+    try:
+        broker_candles = await asyncio.wait_for(
+            broker.get_candles(symbol, timeframe=timeframe, count=limit),
+            timeout=BROKER_CANDLES_TIMEOUT_SECONDS,
+        )
+    except (BrokerOperationError, TimeoutError) as exc:
+        logger.warning(
+            "Active broker candles unavailable; falling back to market data",
+            broker_id=broker_id,
+            symbol=symbol,
+            timeframe=timeframe,
+            error=str(exc),
+        )
+        return None
+    if len(broker_candles) < 5:
+        return None
+
+    sample_price = broker_candles[-1].close
+    decimals = get_decimal_places(sample_price)
+    fetched_at = time.time()
+    last_candle = broker_candles[-1]
+    return {
+        "candles": [_candle_to_api(candle, decimals) for candle in broker_candles[-limit:]],
+        "source": "live",
+        "fetched_at": fetched_at,
+        "sourceMetadata": {
+            "sourceName": active.get("name") or broker_id,
+            "sourceType": "broker",
+            "priceSource": "broker_candles",
+            "brokerId": broker_id,
+            "environment": active.get("environment"),
+            "isFallback": False,
+            "freshnessSeconds": max(0.0, fetched_at - last_candle.time.timestamp()),
+            "qualityFlags": [],
+            "lastBarTimestamp": last_candle.time.isoformat(),
             "marketStatus": "live",
         },
     }
@@ -427,6 +492,10 @@ async def get_candles(
     # Validate symbol against whitelist
     if symbol not in ALLOWED_SYMBOLS and map_symbol_to_yf(symbol) not in ALLOWED_SYMBOLS:
         raise HTTPException(status_code=400, detail=f"Symbol '{symbol}' is not supported")
+
+    broker_candles = await _active_broker_candles(symbol, timeframe, limit)
+    if broker_candles:
+        return broker_candles
 
     # Try real data first
     df = None
