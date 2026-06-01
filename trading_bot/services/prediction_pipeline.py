@@ -45,7 +45,7 @@ from trading_bot.services.trade_suggestions import generate_trade_suggestion
 logger = get_logger(__name__)
 
 
-PREDICTION_FEATURE_VERSION = "prediction_features_v1"
+PREDICTION_FEATURE_VERSION = "prediction_features_v2"
 PREDICTION_CACHE_MAX_ENTRIES = 128
 PREDICTION_CACHE_TTL_SECONDS = 60.0
 PREDICTION_WARMUP_MAX_SYMBOLS = 25
@@ -308,6 +308,12 @@ def _warnings_from_metadata(metadata: dict[str, Any]) -> list[PredictionWarning]
             code=PredictionWarningCode.STALE_DATA,
             severity="warning",
             message="Prediction input data may be stale.",
+        ))
+    elif str(metadata.get("marketStatus") or "").lower() == "delayed":
+        warnings.append(PredictionWarning(
+            code=PredictionWarningCode.STALE_DATA,
+            severity="warning",
+            message="Prediction input data is delayed for the selected timeframe.",
         ))
     return warnings
 
@@ -619,6 +625,39 @@ def _account_risk_warnings(
 
 def _confidence_label(confidence: float) -> str:
     return confidence_band_for_score(confidence).value
+
+
+def _no_trade_confidence_cap(reason: Optional[PredictionNoTradeReason]) -> float:
+    if reason == PredictionNoTradeReason.LOW_CONFIDENCE:
+        return 49.0
+    if reason == PredictionNoTradeReason.REWARD_RISK_COMPRESSED:
+        return 54.0
+    if reason == PredictionNoTradeReason.CONFLICTING_SIGNALS:
+        return 52.0
+    if reason == PredictionNoTradeReason.RISK_LIMITS:
+        return 50.0
+    if reason in {
+        PredictionNoTradeReason.INSUFFICIENT_DATA,
+        PredictionNoTradeReason.MISSING_FEATURES,
+        PredictionNoTradeReason.STALE_DATA,
+        PredictionNoTradeReason.EXCESSIVE_SPREAD,
+        PredictionNoTradeReason.HIGH_VOLATILITY_SPIKE,
+        PredictionNoTradeReason.MARKET_CLOSED,
+        PredictionNoTradeReason.MODEL_UNAVAILABLE,
+        PredictionNoTradeReason.AUTOMATION_DISABLED,
+    }:
+        return 45.0
+    return 54.0
+
+
+def _calibrate_blocked_no_trade_confidence(
+    recommendation: PredictionRecommendation,
+    confidence: float,
+    no_trade_reason: Optional[PredictionNoTradeReason],
+) -> float:
+    if recommendation != PredictionRecommendation.NO_TRADE:
+        return confidence
+    return round(min(confidence, _no_trade_confidence_cap(no_trade_reason)), 2)
 
 
 def _indicator_category(name: str) -> PredictionRationaleCategory:
@@ -1050,6 +1089,14 @@ def build_prediction_response(
         trade_suggestion.expires_at = None
         position_size = None
         position_size_reason = "Position sizing withheld because account risk checks blocked this suggestion."
+
+    if recommendation not in {PredictionRecommendation.BUY, PredictionRecommendation.SELL}:
+        trade_allowed = False
+    confidence = _calibrate_blocked_no_trade_confidence(
+        recommendation,
+        confidence,
+        no_trade_reason,
+    )
 
     chart = PredictionChartOverlay(
         current_price=current_price_float,

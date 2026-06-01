@@ -19,7 +19,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
-import type { AIScoreData, DetectedPattern, ForexPair, SignalStatus, AlignmentData, SignalBacktestResult, SourceMetadata, CopyTradePosition, CopyTradeStats, NoTradeReasonDetail } from '../types'
+import type { AIScoreData, DetectedPattern, ForexPair, SignalStatus, AlignmentData, SignalBacktestResult, SourceMetadata, CopyTradePosition, CopyTradeStats, NoTradeReasonDetail, PredictionRecommendation } from '../types'
 import api from '../lib/api'
 import { formatDateTimeWithZone } from '../lib/time'
 import { DataSourceBadge } from './DataSourceBadge'
@@ -73,6 +73,8 @@ interface AITradingHubProps {
     patternAccuracy?: number | null
     confidenceBand?: string
     noTradeReasons?: NoTradeReasonDetail[]
+    predictionRecommendation?: PredictionRecommendation
+    tradeAllowed?: boolean
   }
   currentPrice: number
   priceChange: number
@@ -323,7 +325,10 @@ function AITradingHub({
   )
 
   const entryMid = (signalDetails.entryRange.min + signalDetails.entryRange.max) / 2
-  const isNoTrade = signalDetails.signal === 'hold' && Boolean(signalDetails.noTradeReasons?.length)
+  const isNoTrade =
+    signalDetails.predictionRecommendation === 'no_trade'
+    || signalDetails.tradeAllowed === false
+    || (signalDetails.signal === 'hold' && Boolean(signalDetails.noTradeReasons?.length))
 
   const hasValidData =
     isNoTrade || (signalDetails.stopLoss !== 0 &&
@@ -388,8 +393,11 @@ function AITradingHub({
 
   const executionWarning = useMemo(() => {
     if (!sourceMetadata) return null
-    if (sourceMetadata.qualityFlags?.includes('stale_data')) {
+    if (sourceMetadata.qualityFlags?.some((flag) => flag.startsWith('stale_data'))) {
       return 'Execution risk elevated: data is stale.'
+    }
+    if (sourceMetadata.marketStatus === 'delayed') {
+      return 'Execution risk elevated: candle data is delayed for this timeframe.'
     }
     if (sourceMetadata.isFallback || sourceMetadata.qualityFlags?.includes('fallback_source')) {
       return 'Execution caution: fallback source active.'

@@ -442,7 +442,7 @@ Before release, run the consolidated validation checklist:
 python release_validate.py
 ```
 
-This checks secret/artifact hygiene, targeted backend broker and trade-ledger tests, the frontend build, and read-only API smoke routes. See `RELEASE_VALIDATION.md` for the full checklist, manual UI smoke notes, and release note template.
+This checks the Python runtime, secret/artifact hygiene, targeted backend broker and trade-ledger tests, the frontend build, and read-only API smoke routes. See `RELEASE_VALIDATION.md` for the full checklist, manual UI smoke notes, and release note template.
 
 ## Safety & Risk Warnings
 

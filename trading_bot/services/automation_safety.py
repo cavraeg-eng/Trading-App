@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, Optional
+from typing import Any
 
 from trading_bot.config import get_settings
 from trading_bot.execution.broker_base import BrokerBalance, BrokerPosition
 from trading_bot.execution.broker_manager import BrokerManager
-
 
 LIVE_READY_ENVIRONMENTS = {
     "alpaca": {"live"},
@@ -20,10 +20,10 @@ LIVE_READY_ENVIRONMENTS = {
 class AutomationGateResult:
     allowed: bool
     reason: str = "ok"
-    detail: Dict[str, Any] = field(default_factory=dict)
+    detail: dict[str, Any] = field(default_factory=dict)
 
 
-def _broker_environment(broker_info: dict) -> Optional[str]:
+def _broker_environment(broker_info: dict) -> str | None:
     info = broker_info.get("info") or {}
     environment = info.get("environment") or broker_info.get("environment")
     return str(environment).lower() if environment else None
@@ -38,11 +38,16 @@ def _is_live_ready_environment(broker_id: str, broker_info: dict) -> bool:
     return environment in {"live", "production", "mainnet"} if environment else False
 
 
+def requires_live_safety_for_broker(broker_id: str, broker_info: dict) -> bool:
+    """Return whether a broker status represents a live-money environment."""
+    return _is_live_ready_environment(broker_id, broker_info)
+
+
 def validate_live_execution_gate(
     *,
     mode: str,
     active_mode: str,
-    broker_id: Optional[str],
+    broker_id: str | None,
     broker_manager: BrokerManager,
 ) -> AutomationGateResult:
     if mode != "live":

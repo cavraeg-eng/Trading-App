@@ -21,7 +21,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
-.python-version
+!.python-version
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -157,4 +157,3 @@ docs/_build/
 # App/tool caches
 .streamlit/
 .vectorbt/
-

@@ -1,19 +1,31 @@
 from trading_bot.config import settings as settings_module
 from trading_bot.config.settings import Settings, TradingMode
-from trading_bot.execution.broker_base import BrokerBalance, BrokerPosition
+from trading_bot.execution.broker_base import BrokerBalance, BrokerPosition, OrderSide
 from trading_bot.services.automation_safety import (
     validate_live_execution_gate,
     validate_live_risk_constraints,
     validate_signal_quality,
+)
+from trading_bot.services.manual_order_safety import (
+    ManualOrderSafetyInput,
+    validate_manual_order_safety,
 )
 
 
 class FakeBrokerManager:
     def __init__(self, status):
         self.status = status
+        self.balance = BrokerBalance(total_equity=10000.0, available_margin=10000.0, used_margin=0.0)
+        self.positions = []
 
     def get_broker_status(self, broker_id: str) -> dict:
         return self.status
+
+    async def get_balance(self, broker_id: str) -> BrokerBalance:
+        return self.balance
+
+    async def get_positions(self, broker_id: str) -> list[BrokerPosition]:
+        return self.positions
 
 
 def set_settings(monkeypatch, trading_mode: TradingMode = TradingMode.PAPER):
@@ -119,3 +131,95 @@ def test_live_risk_gate_rejects_symbol_exposure(monkeypatch):
 
     assert result.allowed is False
     assert result.reason == "max_positions_reached"
+
+
+async def test_manual_live_order_uses_global_live_mode_gate(monkeypatch):
+    set_settings(monkeypatch, TradingMode.PAPER)
+
+    result = await validate_manual_order_safety(
+        ManualOrderSafetyInput(
+            broker_id="oanda",
+            symbol="XAU/USD",
+            side=OrderSide.BUY,
+            quantity=0.01,
+            price=4700.0,
+            stop_loss=4680.0,
+        ),
+        broker_manager=FakeBrokerManager({
+            "exists": True,
+            "connected": True,
+            "is_active": True,
+            "info": {"environment": "live"},
+        }),
+    )
+
+    assert result.allowed is False
+    assert result.reason == "live_mode_not_enabled"
+
+
+async def test_manual_live_order_requires_price_and_stop(monkeypatch):
+    set_settings(monkeypatch, TradingMode.LIVE)
+
+    result = await validate_manual_order_safety(
+        ManualOrderSafetyInput(
+            broker_id="oanda",
+            symbol="XAU/USD",
+            side=OrderSide.BUY,
+            quantity=0.01,
+        ),
+        broker_manager=FakeBrokerManager({
+            "exists": True,
+            "connected": True,
+            "is_active": True,
+            "info": {"environment": "live"},
+        }),
+    )
+
+    assert result.allowed is False
+    assert result.reason == "manual_live_order_requires_price"
+
+
+async def test_manual_live_order_applies_live_risk_gate(monkeypatch):
+    set_settings(monkeypatch, TradingMode.LIVE)
+
+    result = await validate_manual_order_safety(
+        ManualOrderSafetyInput(
+            broker_id="oanda",
+            symbol="XAU/USD",
+            side=OrderSide.BUY,
+            quantity=1.0,
+            price=4700.0,
+            stop_loss=4680.0,
+        ),
+        broker_manager=FakeBrokerManager({
+            "exists": True,
+            "connected": True,
+            "is_active": True,
+            "info": {"environment": "live"},
+        }),
+    )
+
+    assert result.allowed is False
+    assert result.reason == "position_size_limit"
+
+
+async def test_manual_practice_order_does_not_require_live_safety(monkeypatch):
+    set_settings(monkeypatch, TradingMode.PAPER)
+
+    result = await validate_manual_order_safety(
+        ManualOrderSafetyInput(
+            broker_id="oanda",
+            symbol="XAU/USD",
+            side=OrderSide.BUY,
+            quantity=1.0,
+        ),
+        broker_manager=FakeBrokerManager({
+            "exists": True,
+            "connected": True,
+            "is_active": True,
+            "info": {"environment": "practice"},
+        }),
+    )
+
+    assert result.allowed is True
+    assert result.detail["liveSafetyRequired"] is False

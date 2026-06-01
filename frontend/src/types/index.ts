@@ -265,8 +265,12 @@ export interface SourceMetadata {
   priceSource: string;
   isFallback: boolean;
   freshnessSeconds: number | null;
+  barAgeSeconds?: number | null;
+  baseBarAgeSeconds?: number | null;
+  quoteAgeSeconds?: number | null;
   qualityFlags: string[];
   lastBarTimestamp: number | null;
+  baseLastBarTimestamp?: number | null;
   marketStatus: 'live' | 'delayed' | 'stale' | 'unknown' | string;
 }
 

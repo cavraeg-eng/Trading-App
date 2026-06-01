@@ -419,7 +419,7 @@ def test_invalid_directional_levels_downgrade_to_no_trade(monkeypatch):
     assert len(response.warnings) >= 2
 
 
-def test_compressed_primary_target_reward_risk_downgrades_to_no_trade(monkeypatch):
+def test_compressed_targets_reward_risk_downgrades_to_no_trade(monkeypatch):
     monkeypatch.setattr(
         predictions,
         "analyze_symbol",
@@ -427,12 +427,12 @@ def test_compressed_primary_target_reward_risk_downgrades_to_no_trade(monkeypatc
             currentPrice=1.1000,
             signal="buy",
             confidence=82,
-            reason="bullish but first target runway is compressed",
+            reason="bullish but target runway is compressed",
             entryRange={"min": 1.0988, "max": 1.1000},
             stopLoss=1.0960,
             takeProfit1=1.1010,
-            takeProfit2=1.1080,
-            takeProfit3=1.1120,
+            takeProfit2=1.1015,
+            takeProfit3=1.1020,
             riskReward=2.0,
             atr=0.002,
         ),
@@ -453,6 +453,40 @@ def test_compressed_primary_target_reward_risk_downgrades_to_no_trade(monkeypatc
     assert isinstance(response.rationale, PredictionRationale)
     assert response.rationale.blockers
     assert response.rationale.next_conditions
+
+
+def test_conservative_primary_target_allows_later_reward_risk(monkeypatch):
+    monkeypatch.setattr(
+        predictions,
+        "analyze_symbol",
+        lambda symbol, timeframe, trade_style="swing": _analysis(
+            currentPrice=1.1000,
+            signal="buy",
+            confidence=82,
+            reason="bullish continuation with scaled targets",
+            entryRange={"min": 1.0988, "max": 1.1000},
+            stopLoss=1.0960,
+            takeProfit1=1.1010,
+            takeProfit2=1.1080,
+            takeProfit3=1.1120,
+            riskReward=2.0,
+            atr=0.002,
+        ),
+    )
+    monkeypatch.setattr(
+        predictions,
+        "get_ohlcv_with_metadata",
+        lambda symbol, timeframe, trade_style="swing": (None, _metadata(marketStatus="open")),
+    )
+
+    response = predictions.build_prediction_response(_request())
+
+    assert response.recommendation == PredictionRecommendation.BUY
+    assert response.risk_reward is not None and response.risk_reward >= 1.35
+    assert response.take_profit_targets[0].reward_risk is not None
+    assert response.take_profit_targets[0].reward_risk < 1.35
+    assert response.take_profit_targets[1].reward_risk is not None
+    assert response.take_profit_targets[1].reward_risk >= 1.35
 
 
 def _analysis(**overrides):
@@ -522,6 +556,37 @@ def test_prediction_quality_blocks_stale_data():
     )
 
     assert result.gates[0].code == PredictionNoTradeReason.STALE_DATA
+
+
+def test_prediction_quality_blocks_delayed_scalp_data():
+    result = evaluate_prediction_quality(
+        _analysis(),
+        _metadata(
+            freshnessSeconds=650,
+            marketStatus="delayed",
+            tradeStyle="scalp",
+            timeframe="1m",
+        ),
+        config=PredictionQualityConfig(stale_data_seconds=900),
+    )
+
+    assert result.gates[0].code == PredictionNoTradeReason.STALE_DATA
+    assert "delayed" in result.gates[0].message
+
+
+def test_prediction_quality_uses_timeframe_aware_freshness_for_live_swing_data():
+    result = evaluate_prediction_quality(
+        _analysis(),
+        _metadata(
+            freshnessSeconds=3700,
+            marketStatus="live",
+            tradeStyle="swing",
+            timeframe="1h",
+        ),
+        config=PredictionQualityConfig(stale_data_seconds=900),
+    )
+
+    assert not any(gate.code == PredictionNoTradeReason.STALE_DATA for gate in result.gates)
 
 
 def test_prediction_quality_blocks_high_spread():

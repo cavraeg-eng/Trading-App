@@ -1,4 +1,4 @@
-"""Release validation runner for backend, frontend, smoke, and secret checks."""
+"""Release validation runner for environment, backend, frontend, smoke, and secret checks."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parent
 
@@ -60,6 +59,36 @@ class CheckResult:
         self.name = name
         self.ok = ok
         self.detail = detail
+
+
+def environment_check() -> CheckResult:
+    print("\n==> Runtime environment")
+    failures: list[str] = []
+
+    if sys.version_info < (3, 11):  # noqa: UP036 - the release runner must fail early.
+        failures.append(
+            "Python 3.11+ is required; active interpreter is "
+            f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        )
+
+    required_dirs = [
+        ROOT / "data" / "parquet",
+        ROOT / "models",
+        ROOT / "logs",
+    ]
+    for path in required_dirs:
+        path.mkdir(parents=True, exist_ok=True)
+
+    if failures:
+        for failure in failures:
+            print(f"FAIL: {failure}")
+        return CheckResult("Runtime environment", False, f"{len(failures)} failure(s)")
+
+    print(
+        "PASS: Python runtime is supported and local runtime directories exist "
+        f"({sys.executable})"
+    )
+    return CheckResult("Runtime environment", True)
 
 
 def run_command(name: str, command: list[str], cwd: Path = ROOT) -> CheckResult:
@@ -215,6 +244,7 @@ def frontend_check() -> CheckResult:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run release validation checks.")
+    parser.add_argument("--environment", action="store_true", help="Run runtime environment checks.")
     parser.add_argument("--backend", action="store_true", help="Run backend pytest checks.")
     parser.add_argument("--frontend", action="store_true", help="Run frontend build checks.")
     parser.add_argument("--security", action="store_true", help="Run secret and artifact hygiene checks.")
@@ -226,9 +256,18 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     os.environ.setdefault("TRADING_MODE", "paper")
     args = parse_args()
-    selected = args.backend or args.full_backend or args.frontend or args.security or args.smoke
+    selected = (
+        args.environment
+        or args.backend
+        or args.full_backend
+        or args.frontend
+        or args.security
+        or args.smoke
+    )
 
     results: list[CheckResult] = []
+    if args.environment or not selected:
+        results.append(environment_check())
     if args.security or not selected:
         results.append(security_check())
     if args.backend or args.full_backend or not selected:

@@ -1,5 +1,8 @@
 from typing import Optional
 
+import math
+import random
+
 import pandas as pd
 
 from trading_bot.services import market_analysis
@@ -29,6 +32,29 @@ def _anchor_history(_symbol: str, _timeframe: str, _direction: Optional[str]) ->
         "slHitRate": 0.0,
         "expiredRate": 0.0,
     }
+
+
+def _ranging_breakout_candles() -> pd.DataFrame:
+    generator = random.Random(0)
+    price = 1.1
+    rows = []
+    for index in range(100):
+        drift = 0.0
+        if index > 85:
+            drift = generator.choice([-1, 1]) * generator.uniform(0, 0.00018)
+        price += math.sin(index / 3 + 0) * 0.00002 + drift + generator.uniform(-0.00015, 0.00015)
+        price = 1.1 + (price - 1.1) * 0.92
+        rows.append({
+            "open": price + generator.uniform(-0.00005, 0.00005),
+            "high": price + generator.uniform(0.00008, 0.00022),
+            "low": price - generator.uniform(0.00008, 0.00022),
+            "close": price,
+            "volume": 1000 + generator.randint(-50, 50),
+        })
+    return pd.DataFrame(
+        rows,
+        index=pd.date_range("2026-01-01", periods=len(rows), freq="min"),
+    )
 
 
 def test_build_market_analysis_preserves_contract_shape_with_fixture_data():
@@ -64,6 +90,30 @@ def test_build_market_analysis_preserves_contract_shape_with_fixture_data():
         "BB Position",
         "Volume",
     }
+
+
+def test_build_market_analysis_suppresses_weak_scalp_breakout_in_range():
+    analysis = market_analysis.build_market_analysis(
+        "EUR/USD",
+        "1m",
+        "scalp",
+        _ranging_breakout_candles(),
+        {"qualityFlags": [], "sourceName": "fixture"},
+        context_bias_provider=lambda symbol, timeframe, trade_style: ("neutral", 50.0),
+        sentiment_score_provider=lambda symbol: 0.0,
+        anchor_performance_provider=_anchor_history,
+    )
+
+    assert analysis is not None
+    assert analysis["signal"] == "hold"
+    assert analysis["confidence"] <= 54
+    assert analysis["marketRegime"] == "ranging"
+    assert analysis["signalQuality"]["blocked"] is True
+    assert (
+        "ranging scalp setup lacks breakout follow-through"
+        in analysis["signalQuality"]["blockers"]
+    )
+    assert "ranging scalp setup lacks breakout follow-through" in analysis["reason"]
 
 
 def test_analyze_symbol_fetches_data_then_uses_market_analysis_module(monkeypatch):
