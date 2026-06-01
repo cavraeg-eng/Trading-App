@@ -148,6 +148,58 @@ def test_maps_account_positions_and_quote_payloads():
     assert quote.last == pytest.approx(1.0811)
 
 
+def test_get_candles_maps_oanda_mid_candles():
+    client = FakeOandaClient(
+        {
+            ("GET", "/instruments/EUR_USD/candles"): json_response(
+                200,
+                {
+                    "candles": [
+                        {
+                            "complete": True,
+                            "time": "2026-04-30T01:00:00Z",
+                            "volume": 123,
+                            "mid": {
+                                "o": "1.0800",
+                                "h": "1.0820",
+                                "l": "1.0790",
+                                "c": "1.0810",
+                            },
+                        },
+                        {
+                            "complete": False,
+                            "time": "2026-04-30T01:01:00Z",
+                            "volume": 10,
+                            "mid": {
+                                "o": "1.0810",
+                                "h": "1.0830",
+                                "l": "1.0800",
+                                "c": "1.0820",
+                            },
+                        },
+                    ]
+                },
+            )
+        }
+    )
+    broker = connected_broker(client)
+
+    candles = run_async(broker.get_candles("EUR/USD", timeframe="1m", count=20))
+
+    assert len(candles) == 1
+    assert candles[0].symbol == "EUR/USD"
+    assert candles[0].open == 1.08
+    assert candles[0].high == 1.082
+    assert candles[0].low == 1.079
+    assert candles[0].close == 1.081
+    assert candles[0].volume == 123
+    assert client.requests[0]["params"] == {
+        "granularity": "M1",
+        "count": "20",
+        "price": "M",
+    }
+
+
 def test_place_order_uses_oanda_units_and_normalizes_fill_response():
     def capture_order(request: dict):
         assert request["json"]["order"]["type"] == "STOP"

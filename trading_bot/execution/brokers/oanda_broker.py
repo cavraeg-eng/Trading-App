@@ -13,6 +13,7 @@ from trading_bot.config import TradingMode, get_logger, get_settings
 from trading_bot.execution.broker_base import (
     BaseBroker,
     BrokerBalance,
+    BrokerCandle,
     BrokerCapabilities,
     BrokerConfigurationError,
     BrokerOrder,
@@ -30,6 +31,15 @@ _MISS = object()
 _PRACTICE_URL = "https://api-fxpractice.oanda.com/v3"
 _LIVE_URL = "https://api-fxtrade.oanda.com/v3"
 _TRANSIENT_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+_CANDLE_GRANULARITY = {
+    "1m": "M1",
+    "5m": "M5",
+    "15m": "M15",
+    "30m": "M30",
+    "1h": "H1",
+    "4h": "H4",
+    "1d": "D",
+}
 
 
 class OANDABroker(BaseBroker):
@@ -53,6 +63,7 @@ class OANDABroker(BaseBroker):
             close_position=True,
             modify_trade=True,
             quotes=True,
+            candles=True,
         )
         self._client: Optional[httpx.AsyncClient] = None
         self._api_token: Optional[str] = None
@@ -383,6 +394,25 @@ class OANDABroker(BaseBroker):
             broker_id=self.broker_id,
         )
 
+    def _candle_from_payload(self, candle: Dict[str, Any], symbol: str) -> Optional[BrokerCandle]:
+        mid = candle.get("mid") or {}
+        open_price = self._positive_float(mid.get("o"))
+        high_price = self._positive_float(mid.get("h"))
+        low_price = self._positive_float(mid.get("l"))
+        close_price = self._positive_float(mid.get("c"))
+        if None in (open_price, high_price, low_price, close_price):
+            return None
+        return BrokerCandle(
+            symbol=symbol,
+            time=self._parse_timestamp(candle.get("time")),
+            open=float(open_price),
+            high=float(high_price),
+            low=float(low_price),
+            close=float(close_price),
+            volume=self._to_float(candle.get("volume"), 0.0),
+            broker_id=self.broker_id,
+        )
+
     def _balance_from_account(self, account: Dict[str, Any]) -> BrokerBalance:
         total_equity = self._to_float(account.get("NAV"), self._to_float(account.get("balance")))
         available_margin = self._to_float(account.get("marginAvailable"))
@@ -650,8 +680,47 @@ class OANDABroker(BaseBroker):
                 detail=f"OANDA pricing lookup failed: no price returned for {symbol}",
                 category="not_found",
                 status_code=404,
-            )
+        )
         return self._quote_from_price(prices[0], symbol)
+
+    async def get_candles(
+        self,
+        symbol: str,
+        timeframe: str = "1h",
+        count: int = 200,
+    ) -> List[BrokerCandle]:
+        """Get recent OANDA mid-price candles for a symbol."""
+        granularity = _CANDLE_GRANULARITY.get(timeframe)
+        if not granularity:
+            raise BrokerOperationError(
+                detail=f"OANDA candles do not support timeframe '{timeframe}'",
+                category="invalid_timeframe",
+                status_code=400,
+            )
+        payload = await self._request(
+            "GET",
+            f"/instruments/{self._format_instrument(symbol)}/candles",
+            operation="candles lookup",
+            params={
+                "granularity": granularity,
+                "count": str(max(1, min(int(count), 5000))),
+                "price": "M",
+            },
+        )
+        candles: List[BrokerCandle] = []
+        for raw_candle in payload.get("candles") or []:
+            if raw_candle.get("complete") is False:
+                continue
+            candle = self._candle_from_payload(raw_candle, symbol)
+            if candle:
+                candles.append(candle)
+        if not candles:
+            raise BrokerOperationError(
+                detail=f"OANDA candles lookup failed: no candles returned for {symbol}",
+                category="not_found",
+                status_code=404,
+            )
+        return candles
 
     async def _price_map(self, instruments: List[str]) -> Dict[str, float]:
         if not instruments:
