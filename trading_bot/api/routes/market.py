@@ -1,5 +1,6 @@
 """Market analysis routes using the unified market data service."""
 
+import asyncio
 import random
 import threading
 import time
@@ -10,6 +11,8 @@ from fastapi import APIRouter, HTTPException, Query
 
 from trading_bot.api.models import CandleData
 from trading_bot.config import get_logger
+from trading_bot.execution.broker_base import BrokerQuote
+from trading_bot.execution.broker_manager import BrokerOperationError, broker_manager
 from trading_bot.services.market_analysis import (
     ALLOWED_SYMBOLS,
     analyze_multitimeframe,
@@ -32,6 +35,7 @@ _cache_timestamps: Dict[str, float] = {}
 _cache_lock = threading.RLock()
 CACHE_TTL_INTRADAY = 5  # Faster refresh for active intraday trading views
 CACHE_TTL_DAILY = 300  # 300 seconds for daily timeframe
+BROKER_QUOTE_TIMEOUT_SECONDS = 8.0
 
 # Timeframes that need candle aggregation (yfinance doesn't support them natively)
 AGGREGATE_TIMEFRAMES = {
@@ -62,6 +66,75 @@ def set_cached_data(key: str, data: dict) -> None:
     with _cache_lock:
         _cache[key] = data
         _cache_timestamps[key] = time.time()
+
+
+def _price_from_broker_quote(quote: BrokerQuote) -> Optional[float]:
+    if quote.last and quote.last > 0:
+        return float(quote.last)
+    if quote.bid and quote.ask and quote.bid > 0 and quote.ask > 0:
+        return (float(quote.bid) + float(quote.ask)) / 2
+    if quote.bid and quote.bid > 0:
+        return float(quote.bid)
+    if quote.ask and quote.ask > 0:
+        return float(quote.ask)
+    return None
+
+
+async def _active_broker_quote(symbol: str, timeframe: str) -> Optional[dict]:
+    active = broker_manager.get_active_broker_info()
+    if not active or not active.get("connected"):
+        return None
+    capabilities = active.get("capabilities") or {}
+    if not capabilities.get("quotes"):
+        return None
+
+    broker_id = str(active.get("id") or active.get("broker_id") or "")
+    broker = broker_manager.get_broker(broker_id)
+    if not broker:
+        return None
+
+    try:
+        quote = await asyncio.wait_for(
+            broker.get_quote(symbol),
+            timeout=BROKER_QUOTE_TIMEOUT_SECONDS,
+        )
+    except (BrokerOperationError, TimeoutError) as exc:
+        logger.warning(
+            "Active broker quote unavailable; falling back to market data",
+            broker_id=broker_id,
+            symbol=symbol,
+            error=str(exc),
+        )
+        return None
+
+    current_price = _price_from_broker_quote(quote)
+    if current_price is None:
+        return None
+
+    decimals = get_decimal_places(current_price)
+    fetched_at = time.time()
+    return {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "currentPrice": round(current_price, decimals),
+        "priceChange": 0.0,
+        "priceChangePercent": 0.0,
+        "data_fetched_at": fetched_at,
+        "source": "live",
+        "priceSource": "broker_quote",
+        "sourceMetadata": {
+            "sourceName": active.get("name") or broker_id,
+            "sourceType": "broker",
+            "priceSource": "broker_quote",
+            "brokerId": broker_id,
+            "environment": active.get("environment"),
+            "isFallback": False,
+            "freshnessSeconds": max(0.0, fetched_at - quote.timestamp.timestamp()),
+            "qualityFlags": [],
+            "lastBarTimestamp": quote.timestamp.isoformat(),
+            "marketStatus": "live",
+        },
+    }
 
 
 
@@ -188,6 +261,10 @@ async def get_market_quote(
     """Get a lightweight latest quote for fast UI refreshes."""
     if symbol not in ALLOWED_SYMBOLS and map_symbol_to_yf(symbol) not in ALLOWED_SYMBOLS:
         raise HTTPException(status_code=400, detail=f"Symbol '{symbol}' is not supported")
+
+    broker_quote = await _active_broker_quote(symbol, timeframe)
+    if broker_quote:
+        return broker_quote
 
     df, metadata = get_shared_ohlcv_with_metadata(symbol, timeframe, trade_style=trade_style)
     if df is None or len(df) < 2:
