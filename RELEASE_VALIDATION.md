@@ -10,14 +10,16 @@ python release_validate.py
 
 This runs:
 
-1. Secret and artifact hygiene checks.
-2. Targeted backend tests for trade ledger, broker manager, OANDA integration, and live automation safety gates.
-3. Frontend typecheck/build via `npm run build`.
-4. Read-only API smoke checks through FastAPI `TestClient`.
+1. Runtime environment checks, including Python 3.11+ and local runtime directories.
+2. Secret and artifact hygiene checks.
+3. Targeted backend tests for trade ledger, broker manager, OANDA integration, and live automation safety gates.
+4. Frontend typecheck/build via `npm run build`.
+5. Read-only API smoke checks through FastAPI `TestClient`.
 
 Run individual sections when iterating:
 
 ```bash
+python release_validate.py --environment
 python release_validate.py --security
 python release_validate.py --backend
 python release_validate.py --backend --full-backend
@@ -106,6 +108,7 @@ Manual QA checklist:
 - Broker status displays sanitized connection state only.
 - Settings loads broker list and app settings.
 - Automation controls remain disabled or gated unless live mode, broker environment, account risk, and signal quality all pass safety checks.
+- Manual live broker orders require global live mode, an active live broker, current price, stop loss, and passing exposure/risk checks before submission.
 
 Record the browser, viewport, pages checked, and any known limitations in release notes or the Linear issue.
 

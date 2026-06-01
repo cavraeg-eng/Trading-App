@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { TrendingUp, TrendingDown, Activity, Zap, Loader2 } from 'lucide-react'
-import type { AccountMetrics, ForexPair, AIRecommendation, ChartSignalMarker, SignalStatus, AIScoreData, DetectedPattern, CopyTradingSettings, CopyTradePosition, CopyTradeStats, NoTradeReasonDetail } from '../types'
+import type { AccountMetrics, ForexPair, AIRecommendation, ChartSignalMarker, SignalStatus, AIScoreData, DetectedPattern, CopyTradingSettings, CopyTradePosition, CopyTradeStats, NoTradeReasonDetail, PredictionRecommendation } from '../types'
 import { getPairBySymbol } from '../config/forexPairs'
 import { PairSelector } from '../components/PairSelector'
 import { ChartToolbar } from '../components/ChartToolbar'
@@ -69,6 +69,8 @@ interface SignalDetails {
   patternAccuracy?: number | null
   confidenceBand?: string
   noTradeReasons?: NoTradeReasonDetail[]
+  predictionRecommendation?: PredictionRecommendation
+  tradeAllowed?: boolean
 }
 
 interface ActiveSignalMeta {
@@ -339,7 +341,7 @@ function Dashboard({
 
   useEffect(() => {
     if (tradeStyle === 'scalp' && timeframe !== '1m' && timeframe !== '5m') {
-      setTimeframe('1m')
+      setTimeframe('5m')
     }
   }, [tradeStyle, timeframe])
 
@@ -424,13 +426,27 @@ function Dashboard({
         if (predictionRes.status === 'fulfilled' && predictionRes.value.ok) {
           const prediction = await predictionRes.value.json()
           if (cancelled) return
+          const predictionSignal = prediction.recommendation === 'no_trade' ? 'hold' : prediction.recommendation
+          const firstTarget = prediction.take_profit_targets?.[0]
+          const secondTarget = prediction.take_profit_targets?.[1]
+          const thirdTarget = prediction.take_profit_targets?.[2]
           setSignalDetails((prev) => ({
             ...prev,
-            signal: prediction.recommendation === 'no_trade' ? 'hold' : prediction.recommendation,
+            signal: predictionSignal,
             confidence: prediction.confidence ?? prev.confidence,
             confidenceBand: prediction.confidence_band,
             noTradeReasons: prediction.no_trade_reasons ?? [],
-            reason: prediction.suggestion_card?.summary ?? prev.reason,
+            predictionRecommendation: prediction.recommendation,
+            tradeAllowed: prediction.trade_allowed ?? ['buy', 'sell'].includes(prediction.recommendation),
+            reason: prediction.rationale?.summary ?? prediction.suggestion_card?.summary ?? prev.reason,
+            entryRange: prediction.entry
+              ? { min: prediction.entry.min, max: prediction.entry.max }
+              : prev.entryRange,
+            stopLoss: prediction.stop_loss ?? prev.stopLoss,
+            takeProfit1: firstTarget?.price ?? prev.takeProfit1,
+            takeProfit2: secondTarget?.price ?? prev.takeProfit2,
+            takeProfit3: thirdTarget?.price ?? prev.takeProfit3,
+            riskReward: prediction.risk_reward ?? prev.riskReward,
           }))
         }
 
@@ -510,8 +526,9 @@ function Dashboard({
     if (activeSignalMeta.confidence < copySettings.min_confidence) {
       return `Signal confidence is below the ${copySettings.min_confidence}% minimum`
     }
-    if (sourceMetadata?.qualityFlags?.includes('mock_data') || sourceMetadata?.qualityFlags?.includes('stale_data')) {
-      return 'Wait for fresh market data before copying this signal'
+    const staleFlag = sourceMetadata?.qualityFlags?.some((flag) => flag.startsWith('stale_data'))
+    if (sourceMetadata?.qualityFlags?.includes('mock_data') || staleFlag || sourceMetadata?.marketStatus !== 'live') {
+      return 'Wait for live market data before copying this signal'
     }
     if (copiedPositions.some((position) => position.signal_id === activeSignalMeta.signalId && ['open', 'partial_tp1', 'partial_tp2'].includes(position.status))) {
       return 'This signal is already copied'
@@ -757,7 +774,8 @@ function Dashboard({
     if (activeStrategy.symbol !== selectedPair.symbol) return
     if (signalDetails.signal === 'hold') return
     if (signalDetails.confidence < 70) return
-    if (sourceMetadata?.qualityFlags?.includes('stale_data')) return
+    if (sourceMetadata?.qualityFlags?.some((flag) => flag.startsWith('stale_data'))) return
+    if (sourceMetadata?.marketStatus && sourceMetadata.marketStatus !== 'live') return
 
     const side = signalDetails.signal.includes('buy') ? 'buy' : signalDetails.signal.includes('sell') ? 'sell' : null
     if (!side) return

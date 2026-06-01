@@ -2,8 +2,6 @@
 
 import csv
 import io
-import random
-import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -15,6 +13,10 @@ from trading_bot.api.models import OrderRequest
 from trading_bot.execution.broker_base import OrderSide, OrderType
 from trading_bot.execution.broker_manager import BrokerOperationError, broker_manager
 from trading_bot.persistence import trade_ledger as repo
+from trading_bot.services.manual_order_safety import (
+    ManualOrderSafetyInput,
+    validate_manual_order_safety,
+)
 
 router = APIRouter(prefix="/api/broker", tags=["broker"])
 
@@ -118,6 +120,17 @@ def _ledger_summary(entries: List[dict], connected_brokers: List[str]) -> dict:
 
 def _raise_broker_error(exc: BrokerOperationError) -> None:
     raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+
+def _raise_manual_order_gate(reason: str, detail: dict) -> None:
+    status_code = 400 if reason.startswith("manual_live_order_requires_") else 403
+    raise HTTPException(
+        status_code=status_code,
+        detail={
+            "reason": reason,
+            "detail": detail,
+        },
+    )
 
 
 @router.get("/list")
@@ -236,6 +249,20 @@ async def place_order(order: OrderRequest) -> dict:
             status_code=400,
             detail=f"Invalid side '{order.side}' or order_type '{order.order_type}'"
         )
+
+    safety = await validate_manual_order_safety(
+        ManualOrderSafetyInput(
+            broker_id=order.broker_id,
+            symbol=order.symbol,
+            side=side,
+            quantity=order.quantity,
+            price=order.price,
+            stop_loss=order.stop_loss,
+        ),
+        broker_manager=broker_manager,
+    )
+    if not safety.allowed:
+        _raise_manual_order_gate(safety.reason, safety.detail)
 
     # Place order
     try:

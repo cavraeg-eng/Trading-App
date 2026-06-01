@@ -103,6 +103,11 @@ def _targets(analysis: dict[str, Any], entry_mid: float, stop_loss: float) -> li
     return targets
 
 
+def _best_reward_risk(targets: list[PredictionTarget]) -> float:
+    reward_risks = [target.reward_risk for target in targets if target.reward_risk is not None]
+    return max(reward_risks) if reward_risks else 0.0
+
+
 def _coerce_required_levels(
     current_price: Optional[float],
     entry_min: Optional[float],
@@ -214,8 +219,7 @@ def generate_trade_suggestion(
         )
 
     risk_distance = abs(entry_mid - stop_loss)
-    reward_distance = abs(targets[0].price - entry_mid)
-    risk_reward = round(reward_distance / risk_distance, 2) if risk_distance > 0 else 0.0
+    risk_reward = round(_best_reward_risk(targets), 2) if risk_distance > 0 else 0.0
     minimum_distance = max((atr or 0) * 0.05, abs(current_price) * 0.00005, 10 ** -6)
 
     validation_errors = _directionally_valid(
@@ -229,12 +233,18 @@ def generate_trade_suggestion(
     if risk_distance < minimum_distance:
         validation_errors.append("Risk distance is below the minimum price distance.")
     if risk_reward < MIN_RISK_REWARD:
-        validation_errors.append(f"Risk/reward {risk_reward:.2f} is below the {MIN_RISK_REWARD:.2f} minimum.")
+        validation_errors.append(
+            f"Best target risk/reward {risk_reward:.2f} is below the {MIN_RISK_REWARD:.2f} minimum."
+        )
+    elif (targets[0].reward_risk or 0.0) < MIN_RISK_REWARD and len(targets) > 1:
+        warnings.append(_warning(
+            "TP1 is conservative; later targets provide the minimum reward-to-risk runway."
+        ))
 
     if validation_errors:
         return _no_trade(
             PredictionNoTradeReason.REWARD_RISK_COMPRESSED
-            if any("Risk/reward" in problem for problem in validation_errors)
+            if any("risk/reward" in problem.lower() for problem in validation_errors)
             else PredictionNoTradeReason.INSUFFICIENT_DATA,
             _warnings(validation_errors),
             [{

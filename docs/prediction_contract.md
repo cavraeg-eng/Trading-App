@@ -43,6 +43,8 @@
 - `generated_at`
 - consumer `compatibility` guidance
 
+`freshness` and `sourceMetadata` fields must preserve enough provenance for consumers to distinguish current quote freshness from base candle freshness. Synthetic spot series built from adjusted futures candles should expose `barAgeSeconds`, `baseBarAgeSeconds`, `quoteAgeSeconds`, and `baseLastBarTimestamp` when available. Automation and copy-trading surfaces must treat stale base candles as stale even when the spot quote itself is fresh.
+
 Buy and sell responses must include:
 
 - `entry`
@@ -52,6 +54,8 @@ Buy and sell responses must include:
 - `risk_reward`
 
 No-trade responses must include `no_trade_reason` and must not include actionable entry, stop, or target levels.
+
+No-trade confidence is intentionally capped by the blocking reason so a rejected setup cannot appear stronger than an actionable trade. Data-quality, stale-data, market-closed, model-unavailable, excessive-spread, and high-volatility blocks should cap materially lower than low-confidence or compressed-reward/risk blocks.
 
 ## Explainable rationale
 
@@ -78,6 +82,8 @@ Buy and sell suggestions must include `primary_reasons`. No-trade suggestions mu
 
 Account-aware suggestions may block or downgrade otherwise actionable setups when advisory context shows stale account data, daily loss limit breaches, unavailable margin, exposure limit breaches, incompatible trading mode, or conflicting open positions. Broker execution safety gates remain authoritative and must still validate any order before placement.
 
+Live manual broker orders must pass the same live-money safety posture as automation before they reach a broker adapter: global live mode must be enabled, the broker must be active and connected in a live environment, the order must include a current price and stop loss, and account risk/exposure checks must pass.
+
 ## Recommendation states
 
 The contract supports four states:
@@ -95,6 +101,7 @@ The contract supports four states:
 - Live workspace charts should use `chart.entry_zone`, `chart.stop_loss`, `chart.take_profit_targets`, `chart.invalidation_level`, `chart.support`, and `chart.resistance` for buy/sell recommendations. Hold and no-trade responses should render neutral state copy and avoid actionable trade overlays when those fields are absent.
 - Journal records should persist `prediction_id`, `recommendation`, `confidence`, setup levels, and structured `rationale` with resulting trade outcomes.
 - Automation should treat `no_trade` as a successful non-execution result. It should gate live orders on recommendation, confidence, freshness, warnings, risk/reward, and broker risk checks.
+- Manual live execution should surface explicit machine-readable block reasons such as `live_mode_not_enabled`, `manual_live_order_requires_price`, `manual_live_order_requires_stop_loss`, `position_size_limit`, or `total_exposure_limit` before any broker order is submitted.
 
 ## API boundaries
 

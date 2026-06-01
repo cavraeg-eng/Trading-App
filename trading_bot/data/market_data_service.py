@@ -9,6 +9,7 @@ instead of calling yfinance or other data sources directly.
 
 import asyncio
 import threading
+import math
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -208,6 +209,14 @@ def _freshness_thresholds(
     return live_threshold, delayed_threshold
 
 
+def _rounded_age_seconds(reference_timestamp: Optional[float], now: float) -> Optional[float]:
+    if reference_timestamp is None:
+        return None
+    if not math.isfinite(reference_timestamp):
+        return None
+    return round(max(0.0, now - reference_timestamp), 1)
+
+
 def build_source_metadata(
     symbol: str,
     timeframe: str,
@@ -219,11 +228,15 @@ def build_source_metadata(
     quality_flags: Optional[List[str]] = None,
     reference_timestamp: Optional[float] = None,
 ) -> Dict:
+    now = time.time()
     last_ts = _extract_last_timestamp(df)
-    freshness_anchor = reference_timestamp if reference_timestamp is not None else last_ts
-    freshness_seconds = None
-    if freshness_anchor is not None:
-        freshness_seconds = max(0.0, time.time() - freshness_anchor)
+    bar_age_seconds = _rounded_age_seconds(last_ts, now)
+    quote_age_seconds = _rounded_age_seconds(reference_timestamp, now)
+    freshness_candidates = [age for age in (bar_age_seconds, quote_age_seconds) if age is not None]
+    if source_type == "synthetic_spot_from_futures":
+        freshness_seconds = max(freshness_candidates) if freshness_candidates else None
+    else:
+        freshness_seconds = quote_age_seconds if quote_age_seconds is not None else bar_age_seconds
 
     market_status = "unknown"
     if freshness_seconds is not None:
@@ -252,8 +265,12 @@ def build_source_metadata(
         "priceSource": source_type,
         "isFallback": is_fallback,
         "freshnessSeconds": round(freshness_seconds, 1) if freshness_seconds is not None else None,
+        "barAgeSeconds": bar_age_seconds,
+        "baseBarAgeSeconds": bar_age_seconds if source_type == "synthetic_spot_from_futures" else None,
+        "quoteAgeSeconds": quote_age_seconds,
         "qualityFlags": flags,
         "lastBarTimestamp": last_ts,
+        "baseLastBarTimestamp": last_ts if source_type == "synthetic_spot_from_futures" else None,
         "marketStatus": market_status,
     }
 
@@ -491,7 +508,7 @@ def get_ohlcv(
 
     # ── Spot path ────────────────────────────────────────────────────────────
     if use_spot:
-        df, spot_source = _fetch_spot_adjusted_ohlcv(symbol, timeframe)
+        df, spot_source, spot_timestamp = _fetch_spot_adjusted_ohlcv(symbol, timeframe)
         if df is not None:
             quality_flags: List[str] = []
             if validate:
@@ -515,7 +532,7 @@ def get_ohlcv(
                     "synthetic_spot_from_futures",
                     False,
                     quality_flags,
-                    reference_timestamp=time.time(),
+                    reference_timestamp=spot_timestamp,
                 )
                 with _ohlcv_lock:
                     _ohlcv_cache[cache_key] = {
@@ -646,7 +663,7 @@ def get_ohlcv_with_metadata(
     quality_flags: List[str] = []
 
     if use_spot:
-        df, spot_source = _fetch_spot_adjusted_ohlcv(symbol, timeframe)
+        df, spot_source, spot_timestamp = _fetch_spot_adjusted_ohlcv(symbol, timeframe)
         if df is not None:
             if validate:
                 df, issues = validate_ohlcv(
@@ -667,7 +684,7 @@ def get_ohlcv_with_metadata(
                     "synthetic_spot_from_futures",
                     False,
                     quality_flags,
-                    reference_timestamp=time.time(),
+                    reference_timestamp=spot_timestamp,
                 )
                 with _ohlcv_lock:
                     _ohlcv_cache[cache_key] = {
@@ -718,7 +735,10 @@ def get_ohlcv_with_metadata(
     return df, metadata
 
 
-def _fetch_spot_adjusted_ohlcv(symbol: str, timeframe: str) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+def _fetch_spot_adjusted_ohlcv(
+    symbol: str,
+    timeframe: str,
+) -> Tuple[Optional[pd.DataFrame], Optional[str], Optional[float]]:
     """Fetch futures OHLCV and adjust recent candles to spot price level.
 
     Only adjusts candles within the last 4 hours with full factor;
@@ -727,7 +747,7 @@ def _fetch_spot_adjusted_ohlcv(symbol: str, timeframe: str) -> Tuple[Optional[pd
     try:
         from trading_bot.forex_fetcher import ForexFetcher
     except ImportError:
-        return None, None
+        return None, None, None
 
     settings = _get_settings_safe()
     gold_api_key = settings.gold_api_key if settings else None
@@ -751,25 +771,25 @@ def _fetch_spot_adjusted_ohlcv(symbol: str, timeframe: str) -> Tuple[Optional[pd
             spot_result = _aio.run(_fetch_spot_async(symbol, gold_api_key))
 
         if spot_result is None:
-            return None, None
+            return None, None, None
 
-        spot_price, spot_source = spot_result
+        spot_price, spot_source, spot_timestamp = spot_result
 
     except Exception as e:
         logger.warning(f"Spot price fetch error for {symbol}: {e}")
-        return None, None
+        return None, None, None
 
     # Get futures baseline
     period, interval = TIMEFRAME_MAP.get(timeframe, ("5d", "60m"))
     futures_df = fetch_yf_sync(symbol, period=period, interval=interval)
 
     if futures_df is None or futures_df.empty:
-        return None, spot_source
+        return None, spot_source, spot_timestamp
 
     # Calculate adjustment factor
     futures_current = float(futures_df["close"].iloc[-1])
     if futures_current <= 0:
-        return None, spot_source
+        return None, spot_source, spot_timestamp
 
     adjustment_factor = spot_price / futures_current
 
@@ -806,10 +826,10 @@ def _fetch_spot_adjusted_ohlcv(symbol: str, timeframe: str) -> Tuple[Optional[pd
         f"source={spot_source}"
     )
 
-    return df, spot_source
+    return df, spot_source, spot_timestamp
 
 
-async def _fetch_spot_async(symbol: str, gold_api_key: Optional[str]) -> Optional[Tuple[float, str]]:
+async def _fetch_spot_async(symbol: str, gold_api_key: Optional[str]) -> Optional[Tuple[float, str, float]]:
     """Async helper to fetch spot price."""
     from trading_bot.forex_fetcher import ForexFetcher
     async with ForexFetcher(gold_api_key=gold_api_key) as fetcher:
@@ -818,7 +838,7 @@ async def _fetch_spot_async(symbol: str, gold_api_key: Optional[str]) -> Optiona
         else:
             return None
         if spot:
-            return spot.mid, spot.source
+            return spot.mid, spot.source, spot.timestamp
     return None
 
 

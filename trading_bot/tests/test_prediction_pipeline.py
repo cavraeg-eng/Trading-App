@@ -1,6 +1,7 @@
 from trading_bot.api.models import (
     PredictionAssetClass,
     PredictionBrokerContext,
+    PredictionConfidenceBand,
     PredictionNoTradeReason,
     PredictionPositionContext,
     PredictionRecommendation,
@@ -122,7 +123,51 @@ def test_pipeline_quality_gate_converts_weak_actionable_signal_to_no_trade():
     assert response.recommendation == PredictionRecommendation.NO_TRADE
     assert response.no_trade_reason == PredictionNoTradeReason.LOW_CONFIDENCE
     assert response.entry is None
+    assert response.trade_allowed is False
     assert any(detail.code == PredictionNoTradeReason.LOW_CONFIDENCE for detail in response.no_trade_reasons)
+
+
+def test_pipeline_caps_confidence_when_setup_validation_blocks_trade():
+    response = prediction_pipeline.build_prediction_response(
+        _request(),
+        analysis_provider=lambda symbol, timeframe, trade_style="swing": _analysis(
+            confidence=92,
+            takeProfit1=1.1010,
+            takeProfit2=1.1015,
+            takeProfit3=1.1020,
+            riskReward=2.0,
+        ),
+        metadata_provider=lambda symbol, timeframe, trade_style="swing": (None, _metadata()),
+    )
+
+    assert response.recommendation == PredictionRecommendation.NO_TRADE
+    assert response.no_trade_reason == PredictionNoTradeReason.REWARD_RISK_COMPRESSED
+    assert response.confidence == 54.0
+    assert response.confidence_band == PredictionConfidenceBand.MEDIUM
+    assert response.trade_allowed is False
+    assert response.suggestion_card.primary_metric_value == "54%"
+
+
+def test_pipeline_blocks_delayed_scalp_data_before_actionable_trade():
+    response = prediction_pipeline.build_prediction_response(
+        _request(strategy_mode=PredictionStrategyMode.SCALP, timeframe="1m"),
+        analysis_provider=lambda symbol, timeframe, trade_style="swing": _analysis(confidence=86),
+        metadata_provider=lambda symbol, timeframe, trade_style="swing": (
+            None,
+            _metadata(
+                freshnessSeconds=650,
+                marketStatus="delayed",
+                tradeStyle="scalp",
+                timeframe="1m",
+            ),
+        ),
+    )
+
+    assert response.recommendation == PredictionRecommendation.NO_TRADE
+    assert response.no_trade_reason == PredictionNoTradeReason.STALE_DATA
+    assert response.confidence <= 45.0
+    assert response.trade_allowed is False
+    assert response.entry is None
 
 
 def test_pipeline_account_risk_block_withholds_conflicting_position_setup():

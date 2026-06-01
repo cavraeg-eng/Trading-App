@@ -467,6 +467,133 @@ def _cap_confidence_for_quality(
     return capped
 
 
+def _aligned_indicator_counts(indicators: List[dict], signal: str) -> Tuple[int, int]:
+    expected = "bullish" if signal == "buy" else "bearish"
+    opposite = "bearish" if signal == "buy" else "bullish"
+    aligned = 0
+    opposed = 0
+    for indicator in indicators:
+        state = str(indicator.get("signal") or "").lower()
+        if state == expected:
+            aligned += 1
+        elif state == opposite:
+            opposed += 1
+    return aligned, opposed
+
+
+def _pattern_direction_for_signal(signal: str) -> str:
+    return "bullish" if signal == "buy" else "bearish"
+
+
+def _recent_follow_through(
+    df: pd.DataFrame,
+    signal: str,
+    atr: float,
+    current_price: float,
+    trade_style: str,
+) -> float:
+    if df is None or len(df) < 8 or signal not in {"buy", "sell"}:
+        return 0.0
+
+    lookback = 5 if trade_style == "scalp" else 8
+    recent = df["close"].tail(lookback + 1)
+    if len(recent) < 2:
+        return 0.0
+
+    price_delta = _safe_float(recent.iloc[-1] - recent.iloc[0], 0.0)
+    if signal == "sell":
+        price_delta = -price_delta
+    minimum_move = max(
+        _safe_float(atr, 0.0) * (0.10 if trade_style == "scalp" else 0.16),
+        abs(_safe_float(current_price, 0.0)) * (0.00004 if trade_style == "scalp" else 0.00008),
+        1e-9,
+    )
+    return price_delta / minimum_move
+
+
+def _directional_quality_gate(
+    *,
+    signal: str,
+    indicators: List[dict],
+    regime: str,
+    context_bias: str,
+    context_strength: float,
+    top_pattern: Optional[dict],
+    recent_follow_through: float,
+    trade_style: str,
+) -> dict:
+    if signal not in {"buy", "sell"}:
+        return {
+            "blocked": False,
+            "blockers": [],
+            "aligned_indicators": 0,
+            "opposed_indicators": 0,
+            "recent_follow_through": round(recent_follow_through, 2),
+        }
+
+    expected = _pattern_direction_for_signal(signal)
+    opposite = "bearish" if expected == "bullish" else "bullish"
+    aligned, opposed = _aligned_indicator_counts(indicators, signal)
+    pattern_direction = str((top_pattern or {}).get("direction") or "").lower()
+    pattern_confidence = _safe_float((top_pattern or {}).get("confidence"), 0.0)
+    pattern_aligned = pattern_direction == expected
+    pattern_opposed = pattern_direction == opposite
+    context_aligned = context_bias == expected and context_strength >= 58
+    context_opposed = context_bias == opposite and context_strength >= 55
+    regime_aligned = (
+        (signal == "buy" and regime == "trending_up")
+        or (signal == "sell" and regime == "trending_down")
+    )
+    regime_opposed = (
+        (signal == "buy" and regime == "trending_down")
+        or (signal == "sell" and regime == "trending_up")
+    )
+
+    blockers: List[str] = []
+    if context_opposed:
+        blockers.append("higher timeframe bias conflicts with the signal")
+    if regime_opposed:
+        blockers.append("market regime conflicts with the signal")
+    if pattern_opposed:
+        blockers.append("top pattern conflicts with the signal")
+
+    if trade_style == "scalp":
+        confirmed_range_breakout = (
+            regime == "ranging"
+            and pattern_aligned
+            and pattern_confidence >= 84
+            and aligned >= 2
+            and recent_follow_through >= 1.8
+        )
+        enough_confirmation = (
+            aligned >= 3
+            or (aligned >= 2 and (context_aligned or regime_aligned))
+            or confirmed_range_breakout
+        )
+        if regime == "ranging" and not context_aligned and not confirmed_range_breakout:
+            blockers.append("ranging scalp setup lacks breakout follow-through")
+        elif not enough_confirmation:
+            blockers.append("directional evidence is not strong enough for a scalp call")
+    elif aligned < 2 and not context_aligned:
+        blockers.append("directional evidence is not strong enough")
+
+    if opposed > aligned and not (context_aligned or regime_aligned):
+        blockers.append("opposing indicators outweigh aligned indicators")
+
+    return {
+        "blocked": bool(blockers),
+        "blockers": list(dict.fromkeys(blockers)),
+        "aligned_indicators": aligned,
+        "opposed_indicators": opposed,
+        "pattern_aligned": pattern_aligned,
+        "pattern_direction": pattern_direction or None,
+        "pattern_confidence": pattern_confidence if top_pattern else None,
+        "context_aligned": context_aligned,
+        "regime_aligned": regime_aligned,
+        "recent_follow_through": round(recent_follow_through, 2),
+    }
+
+
 def _effective_atr(current_price: float, atr: float, timeframe: str, trade_style: str) -> float:
     if trade_style == "scalp":
         if timeframe == "1m":
@@ -1000,6 +1127,30 @@ def build_market_analysis(
         float(atr),
     )
 
+    recent_follow_through = _recent_follow_through(
+        df,
+        signal,
+        float(atr),
+        float(current_price),
+        trade_style,
+    )
+    signal_quality = _directional_quality_gate(
+        signal=signal,
+        indicators=indicators,
+        regime=regime,
+        context_bias=context_bias,
+        context_strength=float(context_strength),
+        top_pattern=top_pattern,
+        recent_follow_through=recent_follow_through,
+        trade_style=trade_style,
+    )
+    if signal != "hold" and signal_quality["blocked"]:
+        signal = "hold"
+        confidence = min(confidence, 54)
+        reason = f"{reason}, {'; '.join(signal_quality['blockers'])}"
+        patterns = _select_patterns_for_signal(raw_patterns, signal, context_bias)
+        top_pattern = patterns[0] if patterns else None
+
     levels = _build_trade_levels(
         df,
         signal,
@@ -1161,6 +1312,7 @@ def build_market_analysis(
             "riskDistance": round(levels["risk_distance"], decimals),
             "structureConflict": bool(levels["structure_conflict"]),
         },
+        "signalQuality": signal_quality,
         "trade_style": trade_style,
         "higherTimeframeBias": {
             "direction": context_bias,

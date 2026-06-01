@@ -10,6 +10,16 @@ from trading_bot.api.models import PredictionNoTradeReason
 from trading_bot.config import get_settings
 
 
+_TIMEFRAME_SECONDS = {
+    "1m": 60,
+    "5m": 300,
+    "15m": 900,
+    "1h": 3600,
+    "4h": 14400,
+    "1d": 86400,
+}
+
+
 @dataclass(frozen=True)
 class PredictionQualityConfig:
     min_actionable_confidence: float = 62.0
@@ -111,10 +121,34 @@ def _append_data_gates(
     freshness_seconds: float,
     config: PredictionQualityConfig,
 ) -> None:
-    if "stale_data" in quality_flags or metadata.get("marketStatus") == "stale" or freshness_seconds > config.stale_data_seconds:
+    market_status = str(metadata.get("marketStatus") or "").lower()
+    trade_style = str(metadata.get("tradeStyle") or "").lower()
+    timeframe = str(metadata.get("timeframe") or "").lower()
+    freshness_too_old = _freshness_exceeds_timeframe_limit(
+        freshness_seconds,
+        timeframe,
+        config,
+        market_status,
+    )
+    delayed_scalp_data = (
+        market_status == "delayed"
+        and trade_style == "scalp"
+        and timeframe in {"1m", "5m"}
+    )
+    if (
+        any(flag.startswith("stale_data") for flag in quality_flags)
+        or market_status == "stale"
+        or freshness_too_old
+        or delayed_scalp_data
+    ):
+        message = (
+            "Market data is delayed for this scalp timeframe; wait for a fresh candle before acting."
+            if delayed_scalp_data
+            else "Market data is stale; wait for a fresh quote/candle before acting."
+        )
         gates.append(NoTradeGate(
             code=PredictionNoTradeReason.STALE_DATA,
-            message="Market data is stale; wait for a fresh quote/candle before acting.",
+            message=message,
             context={
                 "freshnessSeconds": freshness_seconds if freshness_seconds >= 0 else None,
                 "maxFreshnessSeconds": config.stale_data_seconds,
@@ -137,6 +171,22 @@ def _append_data_gates(
             message=f"Required prediction features are missing: {', '.join(missing_features)}.",
             context={"missingFeatures": missing_features},
         ))
+
+
+def _freshness_exceeds_timeframe_limit(
+    freshness_seconds: float,
+    timeframe: str,
+    config: PredictionQualityConfig,
+    market_status: str,
+) -> bool:
+    if freshness_seconds < 0:
+        return False
+    if market_status in {"live", "delayed", "stale"}:
+        return False
+    expected_seconds = _TIMEFRAME_SECONDS.get(timeframe)
+    if expected_seconds is None:
+        return freshness_seconds > config.stale_data_seconds
+    return freshness_seconds > max(config.stale_data_seconds, expected_seconds * 3)
 
 
 def _append_signal_gates(
@@ -223,6 +273,8 @@ def _calibrated_confidence(
     if metadata.get("marketStatus") == "delayed":
         score -= 4.0
     score -= sum(18.0 if gate.blocking else 4.0 for gate in gates)
+    if signal in {"buy", "sell"}:
+        score = min(score, 94.0)
 
     return _clamp(score, 0.0, 100.0)
 
