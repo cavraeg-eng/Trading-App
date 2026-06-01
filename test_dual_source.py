@@ -9,16 +9,13 @@ evaluating accuracy, latency, reliability, data quality, and alignment.
 import asyncio
 import json
 import statistics
-import sys
 import time
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime
 
 import httpx
 import numpy as np
 import pandas as pd
 import yfinance as yf
-
 
 # ─── Colour helpers for terminal output ──────────────────────────────────────
 GREEN = "\033[92m"
@@ -136,7 +133,7 @@ def test_yfinance_latency(runs: int = 5):
     return latencies
 
 
-def test_yfinance_data_quality(df: Optional[pd.DataFrame]):
+def _yfinance_data_quality(df: pd.DataFrame | None):
     """Analyse data quality of yfinance output."""
     section("1.4 — yfinance Data Quality")
     if df is None:
@@ -193,6 +190,11 @@ def test_yfinance_data_quality(df: Optional[pd.DataFrame]):
     stats["gaps"] = gaps if len(df) > 1 else 0
 
     return stats
+
+
+def test_yfinance_data_quality():
+    """Pytest entrypoint for yfinance data-quality analysis."""
+    assert isinstance(_yfinance_data_quality(test_yfinance_basic_fetch()), dict)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -263,7 +265,7 @@ async def test_coingecko_rate_limits():
     rate_limited = 0
     errors = 0
     async with httpx.AsyncClient(timeout=10.0) as client:
-        for i in range(10):
+        for _i in range(10):
             try:
                 resp = await client.get(url)
                 if resp.status_code == 200:
@@ -412,11 +414,6 @@ async def test_adjustment_factor_stability():
     factor = spot_price / futures_current
     info(f"Adjustment factor: {factor:.6f}")
     info(f"  (spot ${spot_price:,.2f} / futures ${futures_current:,.2f})")
-
-    # Apply adjustment to all bars
-    adjusted_closes = df["close"] * factor
-    max_adj = float(adjusted_closes.max() - df["close"].max() * factor)
-    mean_shift = float((adjusted_closes - df["close"]).mean())
 
     info(f"Mean price shift per bar: ${(spot_price - futures_current):,.2f}")
 
@@ -587,7 +584,7 @@ def test_symbol_coverage():
     info("All other commodities use yfinance futures only")
 
     # Check forex and other categories
-    info(f"\nNon-commodity symbols use yfinance exclusively (no dual-source benefit)")
+    info("\nNon-commodity symbols use yfinance exclusively (no dual-source benefit)")
 
     return spot_symbols
 
@@ -607,7 +604,7 @@ async def main():
     yf_df = test_yfinance_basic_fetch()
     results["yf_timeframes"] = test_yfinance_timeframes()
     results["yf_latency"] = test_yfinance_latency()
-    results["yf_quality"] = test_yfinance_data_quality(yf_df)
+    results["yf_quality"] = _yfinance_data_quality(yf_df)
 
     # ── 2. CoinGecko Tests ──
     header("2. COINGECKO PAXG SPOT TESTS")
