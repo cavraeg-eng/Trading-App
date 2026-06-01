@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -32,7 +32,10 @@ from trading_bot.api.models import (
 )
 from trading_bot.api.routes import predictions
 from trading_bot.api.server import app
-from trading_bot.services.prediction_quality import PredictionQualityConfig, evaluate_prediction_quality
+from trading_bot.services.prediction_quality import (
+    PredictionQualityConfig,
+    evaluate_prediction_quality,
+)
 
 
 def setup_function():
@@ -93,7 +96,7 @@ def _base_response(recommendation: PredictionRecommendation) -> dict:
             badge=recommendation.value,
             summary="Contract validation test.",
         ),
-        "generated_at": datetime.now(tz=timezone.utc),
+        "generated_at": datetime.now(tz=UTC),
     }
 
 
@@ -106,7 +109,7 @@ def test_trade_recommendations_require_actionable_levels(recommendation):
         "take_profit_targets": [PredictionTarget(label="TP1", price=1.11, reward_risk=2.0)],
         "invalidation_level": 1.095,
         "risk_reward": 2.0,
-        "expires_at": datetime.now(tz=timezone.utc),
+        "expires_at": datetime.now(tz=UTC),
     })
 
     response = PredictionResponse(**payload)
@@ -163,7 +166,7 @@ def test_legacy_rationale_items_are_normalized_for_existing_callers():
         "take_profit_targets": [PredictionTarget(label="TP1", price=1.11, reward_risk=2.0)],
         "invalidation_level": 1.095,
         "risk_reward": 2.0,
-        "expires_at": datetime.now(tz=timezone.utc),
+        "expires_at": datetime.now(tz=UTC),
         "rationale": [PredictionRationaleItem(category="summary", summary="Legacy rationale.")],
     })
 
@@ -257,6 +260,119 @@ def test_contract_endpoint_documents_strategy_mode_mapping():
         "position": "swing",
         "automation": "swing",
     }
+
+
+@pytest.mark.asyncio
+async def test_prediction_suggestion_prefers_active_broker_candles(monkeypatch):
+    request_marker = object()
+    calls: dict[str, object] = {}
+
+    async def passthrough_account_context(request, broker_id=None):
+        calls["broker_id"] = broker_id
+        return request
+
+    async def fake_active_broker_ohlcv(
+        symbol: str,
+        timeframe: str,
+        *,
+        trade_style: str,
+        count: int,
+        min_rows: int,
+    ):
+        calls["broker_fetch"] = {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "trade_style": trade_style,
+            "count": count,
+            "min_rows": min_rows,
+        }
+        return request_marker, _metadata(
+            sourceName="OANDA",
+            sourceType="broker_candles",
+            priceSource="broker_candles",
+            brokerId="oanda",
+            environment="practice",
+            marketStatus="live",
+        )
+
+    def fake_build_market_analysis(symbol, timeframe, trade_style, df, metadata):
+        calls["analysis"] = {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "trade_style": trade_style,
+            "df": df,
+            "metadata": metadata,
+        }
+        return _analysis(
+            signal="buy",
+            confidence=78,
+            reason="broker candles confirm bullish continuation",
+        )
+
+    def fail_provider(*args, **kwargs):
+        raise AssertionError("fallback providers should not be used with broker candle overrides")
+
+    monkeypatch.setattr(predictions, "request_with_account_context", passthrough_account_context)
+    monkeypatch.setattr(predictions, "active_broker_ohlcv", fake_active_broker_ohlcv)
+    monkeypatch.setattr(predictions, "build_market_analysis", fake_build_market_analysis)
+    monkeypatch.setattr(predictions, "analyze_symbol", fail_provider)
+    monkeypatch.setattr(predictions, "get_ohlcv_with_metadata", fail_provider)
+
+    response = await predictions.get_prediction_suggestion(
+        "EUR/USD",
+        timeframe="1m",
+        strategy_mode=PredictionStrategyMode.SCALP,
+        broker_id="oanda",
+    )
+
+    assert response.freshness.source_name == "OANDA"
+    assert response.freshness.source_type == "broker_candles"
+    assert response.freshness.price_source == "broker_candles"
+    assert calls["broker_id"] == "oanda"
+    assert calls["broker_fetch"] == {
+        "symbol": "EUR/USD",
+        "timeframe": "1m",
+        "trade_style": "scalp",
+        "count": 220,
+        "min_rows": 30,
+    }
+    assert calls["analysis"]["df"] is request_marker
+    assert calls["analysis"]["metadata"]["brokerId"] == "oanda"
+
+
+@pytest.mark.asyncio
+async def test_prediction_suggestion_falls_back_without_broker_candles(monkeypatch):
+    calls = {"metadata": 0, "analysis": 0}
+
+    async def passthrough_account_context(request, broker_id=None):
+        return request
+
+    async def unavailable_broker_candles(*args, **kwargs):
+        return None, None
+
+    def fail_broker_analysis(*args, **kwargs):
+        raise AssertionError("broker analysis should not run without broker candles")
+
+    def fallback_metadata(symbol, timeframe, trade_style="swing"):
+        calls["metadata"] += 1
+        return None, _metadata(sourceName="fallback", sourceType="fixture", priceSource="fixture")
+
+    def fallback_analysis(symbol, timeframe, trade_style="swing"):
+        calls["analysis"] += 1
+        return _analysis(signal="hold", confidence=54, reason="fallback data is mixed")
+
+    monkeypatch.setattr(predictions, "request_with_account_context", passthrough_account_context)
+    monkeypatch.setattr(predictions, "active_broker_ohlcv", unavailable_broker_candles)
+    monkeypatch.setattr(predictions, "build_market_analysis", fail_broker_analysis)
+    monkeypatch.setattr(predictions, "get_ohlcv_with_metadata", fallback_metadata)
+    monkeypatch.setattr(predictions, "analyze_symbol", fallback_analysis)
+
+    response = await predictions.create_prediction_suggestion(_request())
+
+    assert response.freshness.source_name == "fallback"
+    assert response.freshness.source_type == "fixture"
+    assert response.recommendation == PredictionRecommendation.HOLD
+    assert calls == {"metadata": 1, "analysis": 1}
 
 
 def test_incomplete_buy_levels_downgrade_to_no_trade_without_targets(monkeypatch):
